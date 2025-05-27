@@ -20,7 +20,6 @@ import noise_lib
 import utils
 from model import SEDD, SEDDCond, SEDDCondBlock, SEDDBlock
 from model.ema import ExponentialMovingAverage
-# from transformers import GPT2TokenizerFast, GPT2LMHeadModel
 
 
 torch.backends.cudnn.benchmark = True
@@ -134,10 +133,6 @@ def _run(rank, world_size, cfg):
     state = utils.restore_checkpoint(checkpoint_meta_dir, state, device)
     initial_step = int(state['step'])
 
-    
-    # load in tokenizer
-    # tokenizer = GPT2TokenizerFast.from_pretrained('gpt2')
-
     # Build data iterators
     train_ds, eval_ds = data.get_dataloaders(cfg)
 
@@ -169,11 +164,6 @@ def _run(rank, world_size, cfg):
     while state['step'] < num_train_steps + 1:
         step = state['step']
 
-
-        # if cfg.data.train != "text8":
-        #     batch = next(train_iter)['input_ids'].to(device)
-        # else:
-        #     batch = next(train_iter).to(device)
         cond, batch = next(train_iter)
         batch, cond = batch.to(device).reshape(batch.shape[0], -1), cond.to(device)
         loss = train_step_fn(state, batch, cond)
@@ -230,29 +220,5 @@ def _run(rank, world_size, cfg):
                         generated_indexes = torch.cat(generated_index, dim = 0).cpu().numpy()
                         file_name = os.path.join(this_sample_dir, f"sample_{rank}_{j}.txt")
                         np.savetxt(file_name, generated_indexes)
-                    # sentences = tokenizer.batch_decode(sample)
-                    
-                    # with open(file_name, 'w') as file:
-                    #     for sentence in sentences:
-                    #         file.write(sentence + "\n")
-                    #         file.write("============================================================================================\n")
-
-                    # if cfg.eval.perplexity:
-                    #     with torch.no_grad():
-                    #         eval_model = GPT2LMHeadModel.from_pretrained("gpt2-large").to(device).eval()
-                    #         batches = sample.shape[0] // cfg.eval.perplexity_batch_size
-                    #         total_perplexity = 0
-                    #         for i in range(batches):
-                    #             s = sample[i * cfg.eval.perplexity_batch_size:(i + 1) * cfg.eval.perplexity_batch_size]
-                    #             loss, logits = eval_model(s, labels=s)[:2]
-                    #             logits = logits.transpose(-1, -2)
-                    #             perplexity = F.cross_entropy(logits[..., :-1], s[..., 1:], reduction="none").mean(dim=-1).exp().mean()
-                    #             total_perplexity += perplexity
-                    #         total_perplexity /= batches
-                    #         dist.all_reduce(total_perplexity)
-                    #         total_perplexity /= world_size
-                    #         mprint(f"Generative Perplexity at step: {step}. Perplexity: {total_perplexity:.3f}.")
-
-                    #         del eval_model, logits, loss
 
                     dist.barrier()
