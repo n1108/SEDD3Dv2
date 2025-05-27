@@ -109,7 +109,7 @@ class LabelEmbedder(nn.Module):
     def forward(self, labels):
         embeddings = self.embedding_table(labels)
         return embeddings
-    
+
 
 #################################################################################
 #                                 Core Model                                    #
@@ -276,117 +276,6 @@ class DDiTSparseBlock(DDiTBlock):
         # mlp operation
         x = bias_dropout_scale_fn(self.mlp(modulate_fused(self.norm2(x), shift_mlp, scale_mlp)), None, gate_mlp, x, self.dropout)
         return x
-    
-
-class DDiTBlockBlock(DDiTBlock):
-
-    def __init__(self, dim, n_heads, cond_dim, block_size, mlp_ratio=4, dropout=0.1):
-        super().__init__(dim, n_heads, cond_dim, mlp_ratio, dropout)
-        self.block_size = block_size
-
-
-    def forward(self, 
-                x, 
-                c, 
-                rotary_cos_sin_query, 
-                rotary_cos_sin_key,
-                neighbor, 
-                hwu,
-                seqlens=None):
-        h, w, u = hwu
-        block_size = self.block_size
-        in_x = h // block_size
-        in_y = w // block_size
-        in_z = u // block_size
-        batch_size, seq_len = x.shape[0], x.shape[1]
-
-        def transform(x):
-            x = rearrange(x, 'b (n m l) d -> b n m l d', n=h, m=w, l=u)
-            x = rearrange(x, 'b (x l) (y w) (z u) d -> b (x y z) (l w u) d', l=block_size, w=block_size, u=block_size)
-            return x
-
-        def inverse_transform(x):
-            x = rearrange(x, 'b (x y z) (l w u) d -> b (x l y w z u) d', l=block_size, w=block_size, u=block_size, x=in_x, y=in_y, z=in_z)
-            return x
-
-        bias_dropout_scale_fn = self._get_bias_dropout_scale()
-
-        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(c)[:, None].chunk(6, dim=2)
-
-        # attention operation
-        x_skip = x
-        x = modulate_fused(self.norm1(x), shift_msa, scale_msa)
-        # dtype0 = x.dtype
-
-        x = transform(x)        # B*block_len*(bs*bs*bs)*d
-        x = rearrange(x, 'b s p d -> (b s) p d') # (B*block_len)*(bs*bs*bs)*d
-        qkv = self.attn_qkv(x)
-        (q, k, v) = qkv.chunk(3, dim=-1)  # (B*block_len)*(bs*bs*bs)*d
-        
-        k = k[neighbor]  # (B*block_len*num_neighbor)*(bs*bs*bs)*d
-        v = v[neighbor]  # (B*block_len*num_neighbor)*(bs*bs*bs)*d
-        q = rearrange(q, 'b p (h d) -> b p h d', h=self.n_heads)  # (B*block_len)*(bs*bs*bs)*h*hd
-        k = rearrange(k, 'b p (h d) -> b p h d', h=self.n_heads)  # (B*block_len*num_neighbor)*(bs*bs*bs)*h*hd
-        with torch.cuda.amp.autocast(enabled=False):
-            cos, sin = rotary_cos_sin_query
-            q = rotary._apply_rotary_pos_emb_torchscript(
-                q, cos.to(qkv.dtype), sin.to(qkv.dtype)
-            )
-            cos, sin = rotary_cos_sin_key
-            k = rotary._apply_rotary_pos_emb_torchscript(
-                k, cos.to(qkv.dtype), sin.to(qkv.dtype)
-            )
-        k = rearrange(k, '(b n) p ... -> b (n p) ...', b = q.shape[0])  # (B*block_len)*(num_neighbor*bs*bs*bs)*h*hd
-        v = rearrange(v, '(b n) p (h d) -> b (n p) h d', b = q.shape[0], h=self.n_heads)
-        x = flash_attn_func(q, k, v)   # (B*block_len)*(bs*bs*bs)*h*hd
-        
-        x = rearrange(x, '(b n) s h d -> b n s (h d)', b=batch_size)  # (B*block_len)*(bs*bs*bs)*d
-
-        x = inverse_transform(x)
-        x = bias_dropout_scale_fn(self.attn_out(x), None, gate_msa, x_skip, self.dropout)
-
-        # mlp operation
-        x = bias_dropout_scale_fn(self.mlp(modulate_fused(self.norm2(x), shift_mlp, scale_mlp)), None, gate_mlp, x, self.dropout)
-        return x
-
-class VoxelPatchEmbeddingMixin(nn.Module):
-    def __init__(self, dim, vocab_dim, hidden_size, patch_size, bias=True, cond=False):
-        super().__init__()
-        self.cond = cond
-        self.vocab_dim = vocab_dim
-        self.embedding = nn.Embedding(vocab_dim, dim)
-        if cond:
-            dim *= 2
-        self.proj = nn.Conv3d(dim, hidden_size, kernel_size=patch_size, stride=patch_size, bias=bias)
-        nn.init.kaiming_uniform_(self.embedding.weight.data, a=math.sqrt(5))
-        w = self.proj.weight.data
-        nn.init.xavier_uniform_(w.view([w.shape[0], -1]))
-        nn.init.constant_(self.proj.bias, 0)
-
-    def forward(self, x, cond):
-        voxels = x
-        emb = self.embedding(voxels).permute(0, 4, 1, 2, 3) 
-        if self.cond:
-            one_hot_labels = F.one_hot(cond, num_classes=self.vocab_dim).permute(0, 4, 1, 2, 3).float()
-            interpolate_labels = F.interpolate(one_hot_labels, size=x.shape[1:], mode='trilinear')
-            cond = interpolate_labels.argmax(dim=1).byte()
-            cond = self.embedding(cond.long()).permute(0, 4, 1, 2, 3)  
-            emb = torch.cat([emb, cond], dim=1)
-        emb = self.proj(emb)
-        return emb
-
-class EmbeddingLayer(nn.Module):
-    def __init__(self, dim, vocab_dim):
-        """
-        Mode arg: 0 -> use a learned layer, 1 -> use eigenvectors, 
-        2-> add in eigenvectors, 3 -> use pretrained embedding matrix
-        """
-        super().__init__()
-        self.embedding = nn.Parameter(torch.empty((vocab_dim, dim)))
-        torch.nn.init.kaiming_uniform_(self.embedding, a=math.sqrt(5))
-
-    def forward(self, x):
-        return self.embedding[x]
 
 
 class DDitFinalLayer(nn.Module):
@@ -428,79 +317,32 @@ def unpatchify(x, c, p, hwu=None):
     
     return imgs
 
-class SEDD(nn.Module, PyTorchModelHubMixin):
-    def __init__(self, config):
+
+class VoxelPatchEmbeddingMixin(nn.Module):
+    def __init__(self, dim, vocab_dim, hidden_size, patch_size, bias=True, cond=False):
         super().__init__()
+        self.cond = cond
+        self.vocab_dim = vocab_dim
+        self.embedding = nn.Embedding(vocab_dim, dim)
+        if cond:
+            dim *= 2
+        self.proj = nn.Conv3d(dim, hidden_size, kernel_size=patch_size, stride=patch_size, bias=bias)
+        nn.init.kaiming_uniform_(self.embedding.weight.data, a=math.sqrt(5))
+        w = self.proj.weight.data
+        nn.init.xavier_uniform_(w.view([w.shape[0], -1]))
+        nn.init.constant_(self.proj.bias, 0)
 
-        # hack to make loading in configs easier
-        if type(config) == dict:
-            config = OmegaConf.create(config)
-
-        self.config = config
-        self.num_patches = self.config.image_size[0] * self.config.image_size[1] * self.config.image_size[2] // self.config.model.patch_size**3
-
-        self.absorb = config.graph.type == "absorb"
-        vocab_size = config.tokens + (1 if self.absorb else 0)  # TODO: class 0 for absorb
-
-        self.vocab_embed = VoxelPatchEmbeddingMixin(config.model.hidden_size, vocab_size, config.model.hidden_size, config.model.patch_size)
-        self.sigma_map = TimestepEmbedder(config.model.cond_dim)
-        self.rotary_emb = rotary.RotaryPositionEmbedding3D(image_size=np.array(config.data.next_data_size) // config.model.patch_size  * 2, 
-                                                           hidden_size_head=config.model.hidden_size //  config.model.n_heads, )
-        # self.rotary_emb = rotary.Rotary(config.model.hidden_size // config.model.n_heads)
-
-
-
-        self.blocks = nn.ModuleList([
-            DDiTBlock(config.model.hidden_size, config.model.n_heads, config.model.cond_dim, dropout=config.model.dropout) for _ in range(config.model.n_blocks)
-        ])
-
-        self.output_layer = DDitFinalLayer(config.model.hidden_size, vocab_size, config.model.cond_dim, config.model.patch_size)
-        self.scale_by_sigma = config.model.scale_by_sigma
-
-    
-    def _get_bias_dropout_scale(self):
-        return (
-            bias_dropout_add_scale_fused_train
-            if self.training
-            else bias_dropout_add_scale_fused_inference
-        )
-
-
-    def forward(self, indices, cond, sigma):
-        h, w, u = self.config.image_size
-        hwu=[h//self.config.model.patch_size, w//self.config.model.patch_size, u//self.config.model.patch_size]
-        position_ids = torch.zeros(self.num_patches, 3, device=indices.device)
-        position_ids[:, 0] = torch.arange(self.num_patches) // (self.config.image_size[2] // self.config.model.patch_size) \
-                            // (self.config.image_size[1] // self.config.model.patch_size) \
-                            % (self.config.image_size[0] // self.config.model.patch_size)
-        position_ids[:, 1] = torch.arange(self.num_patches) // (self.config.image_size[2] // self.config.model.patch_size) \
-                            % (self.config.image_size[1] // self.config.model.patch_size)
-        position_ids[:, 2] = torch.arange(self.num_patches) % (self.config.image_size[2] // self.config.model.patch_size)
-        position_ids = torch.repeat_interleave(position_ids.unsqueeze(0), indices.shape[0], dim=0).long()
-        position_ids[position_ids==-1] = 0
-        
-        x = self.vocab_embed(indices.reshape(indices.shape[0], h, w, u), cond)
-        x = x.flatten(2).transpose(1, 2) 
-        c = F.silu(self.sigma_map(sigma))
-
-        rotary_cos_sin = self.rotary_emb(x, position_ids)
-        # rotary_cos_sin = self.rotary_emb(x)
-
-        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-            for i in range(len(self.blocks)):
-                x = self.blocks[i](x, rotary_cos_sin, c, seqlens=None)
-
-            x = self.output_layer(x, c, hwu)
-
-
-        x = x.reshape(x.shape[0], -1, x.shape[-1])
-        if self.scale_by_sigma and self.absorb:
-            assert self.absorb, "Haven't configured this to work."
-            esigm1_log = torch.where(sigma < 0.5, torch.expm1(sigma), sigma.exp() - 1).log().to(x.dtype)[:, None, None]
-            x = x - esigm1_log - np.log(x.shape[-1] - 1)# this will be approximately averaged at 0
-            
-        x = torch.scatter(x, -1, indices[..., None], torch.zeros_like(x[..., :1]))
-        return x
+    def forward(self, x, cond):
+        voxels = x
+        emb = self.embedding(voxels).permute(0, 4, 1, 2, 3) 
+        if self.cond:
+            one_hot_labels = F.one_hot(cond, num_classes=self.vocab_dim).permute(0, 4, 1, 2, 3).float()
+            interpolate_labels = F.interpolate(one_hot_labels, size=x.shape[1:], mode='trilinear')
+            cond = interpolate_labels.argmax(dim=1).byte()
+            cond = self.embedding(cond.long()).permute(0, 4, 1, 2, 3)  
+            emb = torch.cat([emb, cond], dim=1)
+        emb = self.proj(emb)
+        return emb
     
 
 class SEDDCond(nn.Module, PyTorchModelHubMixin):
@@ -702,130 +544,3 @@ def get_neighbor_indices(batch_size, H, W, L, device, neighbor_direction='cross'
     neighbors[..., 3] = torch.clamp(neighbors[..., 3], 0, L - 1)  # L dimension
     neighbors = neighbors[..., 0]*H*W*L + neighbors[..., 1]*W*L + neighbors[..., 2]*L + neighbors[..., 3]
     return neighbors.reshape(batch_size, -1, num_neighbor)      # B, block_len, num_neighbor
-
-class SEDDBlock(nn.Module, PyTorchModelHubMixin):
-    def __init__(self, config):
-        super().__init__()
-
-        # hack to make loading in configs easier
-        if type(config) == dict:
-            config = OmegaConf.create(config)
-
-        self.config = config
-        self.num_patches = self.config.image_size[0] * self.config.image_size[1] * self.config.image_size[2] // self.config.model.patch_size**3
-        # self.block_size_lr = self.config.model.block_size * self.config.model.patch_size // self.config.model.sr_scale
-
-        self.absorb = config.graph.type == "absorb"
-        vocab_size = config.tokens + (1 if self.absorb else 0)  # TODO: class 0 for absorb
-
-        self.vocab_embed = VoxelPatchEmbeddingMixin(config.model.hidden_size, vocab_size, config.model.hidden_size, config.model.patch_size, cond=False)
-        self.sigma_map = TimestepEmbedder(config.model.cond_dim)
-        self.rotary_emb = rotary.RotaryPositionEmbedding3D(image_size=np.array(config.image_size) // config.model.patch_size  * 2, 
-                                                           hidden_size_head=config.model.hidden_size //  config.model.n_heads, )
-        # self.rotary_emb = rotary.Rotary(config.model.hidden_size // config.model.n_heads)
-
-
-
-        self.blocks = nn.ModuleList([
-            DDiTBlockBlock(config.model.hidden_size, config.model.n_heads, config.model.cond_dim, 
-                            block_size=config.model.block_size,
-                            dropout=config.model.dropout) for _ in range(config.model.n_blocks)
-        ])
-
-        self.output_layer = DDitFinalLayer(config.model.hidden_size, vocab_size, config.model.cond_dim, config.model.patch_size)
-        self.scale_by_sigma = config.model.scale_by_sigma
-
-    
-    def _get_bias_dropout_scale(self):
-        return (
-            bias_dropout_add_scale_fused_train
-            if self.training
-            else bias_dropout_add_scale_fused_inference
-        )
-
-
-    def forward(self, indices, cond, sigma):
-        b = indices.shape[0]
-        h, w, u = self.config.image_size
-        hwu=[h//self.config.model.patch_size, w//self.config.model.patch_size, u//self.config.model.patch_size]
-        position_ids = torch.zeros(self.num_patches, 3, device=indices.device)
-        position_ids[:, 0] = torch.arange(self.num_patches) // (self.config.image_size[2] // self.config.model.patch_size) \
-                            // (self.config.image_size[1] // self.config.model.patch_size) \
-                            % (self.config.image_size[0] // self.config.model.patch_size)
-        position_ids[:, 1] = torch.arange(self.num_patches) // (self.config.image_size[2] // self.config.model.patch_size) \
-                            % (self.config.image_size[1] // self.config.model.patch_size)
-        position_ids[:, 2] = torch.arange(self.num_patches) % (self.config.image_size[2] // self.config.model.patch_size)
-        position_ids = torch.repeat_interleave(position_ids.unsqueeze(0), indices.shape[0], dim=0).long()
-        position_ids[position_ids==-1] = 0
-        if hasattr(self.config.data, 'crop_size'):
-            position_ids[:,:,0] += torch.randint(0, self.config.image_size[0] // self.config.model.patch_size, (indices.shape[0], 1), device=indices.device)
-            position_ids[:,:,1] += torch.randint(0, self.config.image_size[1] // self.config.model.patch_size, (indices.shape[0], 1), device=indices.device)
-            position_ids[:,:,2] += torch.randint(0, self.config.image_size[2] // self.config.model.patch_size, (indices.shape[0], 1), device=indices.device)
-
-        def transform(x):
-            x = rearrange(x, 'b (n m l) d -> b n m l d', n=h//self.config.model.patch_size, m=w//self.config.model.patch_size, l=u//self.config.model.patch_size)
-            x = rearrange(x, 'b (x l) (y w) (z u) d -> b (x y z) (l w u) d', l=self.config.model.block_size, w=self.config.model.block_size, u=self.config.model.block_size)
-            return x
-        
-        position_ids = transform(position_ids)   # B*block_len*(bs*bs*bs)*3
-
-        # unfolded = cond.unfold(1, self.block_size_lr, self.block_size_lr).unfold(2, self.block_size_lr, self.block_size_lr).unfold(3, self.block_size_lr, self.block_size_lr)
-        # unfolded = unfolded.contiguous().view(cond.shape[0], -1, self.block_size_lr, self.block_size_lr, self.block_size_lr)
-        # block_sums = unfolded.sum(dim=[2, 3, 4])
-        # nonzero_blocks = (block_sums != 0)
-        neighbor_indices = get_neighbor_indices(b, 
-                                                h//self.config.model.patch_size//self.config.model.block_size, 
-                                                w//self.config.model.patch_size//self.config.model.block_size, 
-                                                u//self.config.model.patch_size//self.config.model.block_size, 
-                                                indices.device,
-                                                self.config.model.neighbor_direction)    # B, block_len, num_neighbor
-        neighbor_indices = neighbor_indices.reshape(-1)     # B*block_len*num_neighbor
-        rope_position_ids_query = position_ids.reshape(-1, position_ids.shape[2], position_ids.shape[3])    # (B*block_len)*(bs*bs*bs)*3
-        rope_position_ids_key = position_ids.reshape(-1, position_ids.shape[2], position_ids.shape[3])[neighbor_indices]    # (B*block_len*num_neighbor)*(bs*bs*bs)*3
-        if not self.training:
-            indices_tmp = indices.reshape(indices.shape[0], h, w, u)
-            x1 = self.vocab_embed(indices_tmp[:,:indices_tmp.shape[1]//2,:indices_tmp.shape[2]//2,:], 
-                                  cond[:,:cond.shape[1]//2,:cond.shape[2]//2,:])
-            x2 = self.vocab_embed(indices_tmp[:,:indices_tmp.shape[1]//2,indices_tmp.shape[2]//2:,:], 
-                                  cond[:,:cond.shape[1]//2,cond.shape[2]//2:,:])
-            x3 = self.vocab_embed(indices_tmp[:,indices_tmp.shape[1]//2:,:indices_tmp.shape[2]//2,:], 
-                                  cond[:,cond.shape[1]//2:,:cond.shape[2]//2,:])
-            x4 = self.vocab_embed(indices_tmp[:,indices_tmp.shape[1]//2:,indices_tmp.shape[2]//2:,:], 
-                                  cond[:,cond.shape[1]//2:,cond.shape[2]//2:,:])
-            x = torch.cat((torch.cat((x1, x2), dim=3), torch.cat((x3, x4), dim=3)), dim=2)
-        else:
-            x = self.vocab_embed(indices.reshape(indices.shape[0], h, w, u), cond)
-        x = x.flatten(2).transpose(1, 2) 
-        c = F.silu(self.sigma_map(sigma))
-
-        rotary_cos_sin_query = self.rotary_emb(x, rope_position_ids_query, True)
-        rotary_cos_sin_key = self.rotary_emb(x, rope_position_ids_key, True)
-        # rotary_cos_sin = self.rotary_emb(x)
-
-        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-            for i in range(len(self.blocks)):
-                x = self.blocks[i](x, 
-                                   rotary_cos_sin_query=rotary_cos_sin_query, 
-                                   rotary_cos_sin_key=rotary_cos_sin_key, 
-                                   neighbor=neighbor_indices, 
-                                   hwu=hwu,
-                                   c=c, 
-                                   seqlens=None)
-
-            x = self.output_layer(x, c, hwu)
-
-
-        x = x.reshape(x.shape[0], -1, x.shape[-1])
-        if self.scale_by_sigma and self.absorb:
-            assert self.absorb, "Haven't configured this to work."
-            esigm1_log = torch.where(sigma < 0.5, torch.expm1(sigma), sigma.exp() - 1).log().to(x.dtype)[:, None, None]
-            x = x - esigm1_log - np.log(x.shape[-1] - 1)# this will be approximately averaged at 0
-            
-        x = torch.scatter(x, -1, indices[..., None], torch.zeros_like(x[..., :1]))
-        return x
-
-class SEDDCondBlock(SEDDBlock):
-    def __init__(self, config):
-        super().__init__(config)
-        vocab_size = config.tokens + (1 if self.absorb else 0)  
-        self.vocab_embed = VoxelPatchEmbeddingMixin(config.model.hidden_size, vocab_size, config.model.hidden_size, config.model.patch_size, cond=True)

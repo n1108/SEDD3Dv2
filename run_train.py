@@ -6,7 +6,7 @@ from itertools import chain
 import signal
 
 import numpy as np
-from model.cnn import DenoiseCNN
+# from model.cnn import DenoiseCNN
 import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -18,7 +18,8 @@ import sampling
 import graph_lib
 import noise_lib
 import utils
-from model import SEDD, SEDDCond, SEDDCondBlock, SEDDBlock
+# from model import SEDD, SEDDCond, SEDDCondBlock, SEDDBlock
+from model import SEDDCond
 from model.ema import ExponentialMovingAverage
 
 
@@ -91,20 +92,8 @@ def _run(rank, world_size, cfg):
     graph = graph_lib.get_graph(cfg, device)
     
     # build score model
-    if cfg.model.type == 'cnn':
-        if cfg.data.prev_stage != 'none':
-            score_model = DenoiseCNN(cfg, cond=True).to(device)
-        else:
-            score_model = DenoiseCNN(cfg, cond=False).to(device)
-    elif hasattr(cfg, 'block_dit') and cfg.block_dit == True:
-        if cfg.data.prev_stage != 'none':
-            score_model = SEDDCondBlock(cfg).to(device)
-        else:
-            score_model = SEDDBlock(cfg).to(device)
-    elif cfg.data.prev_stage != 'none':
+    if cfg.data.prev_stage != 'none':
         score_model = SEDDCond(cfg).to(device)
-    else:
-        score_model = SEDD(cfg).to(device)
     score_model = DDP(score_model, device_ids=[rank], static_graph=True, find_unused_parameters=True)
 
     num_parameters = sum(p.numel() for p in score_model.parameters())

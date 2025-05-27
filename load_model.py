@@ -1,7 +1,8 @@
 import os
 import torch
-from model import SEDD, SEDDCond, SEDDCondBlock
-from model.cnn import DenoiseCNN
+# from model import SEDD, SEDDCond, SEDDCondBlock
+from model import SEDDCond
+# from model.cnn import DenoiseCNN
 import utils
 from model.ema import ExponentialMovingAverage
 import graph_lib
@@ -10,7 +11,7 @@ import noise_lib
 from omegaconf import OmegaConf
 
 def load_model_hf(dir, device):
-    score_model = SEDD.from_pretrained(dir).to(device)
+    score_model = SEDDCond.from_pretrained(dir).to(device)
     graph = graph_lib.get_graph(score_model.config, device)
     noise = noise_lib.get_noise(score_model.config).to(device)
     return score_model, graph, noise
@@ -26,17 +27,8 @@ def load_model_local(root_dir, device, ckpt_dir=None):
     graph = graph_lib.get_graph(cfg, device)
     noise = noise_lib.get_noise(cfg).to(device)
     # build score model
-    if cfg.model.type == 'cnn':
-        if cfg.data.prev_stage != 'none':
-            score_model = DenoiseCNN(cfg, cond=True).to(device)
-        else:
-            score_model = DenoiseCNN(cfg, cond=False).to(device)
-    elif cfg.data.prev_stage != 'none' and hasattr(cfg, 'block_dit') and cfg.block_dit == True:
-        score_model = SEDDCondBlock(cfg).to(device)
-    elif cfg.data.prev_stage != 'none':
+    if cfg.data.prev_stage != 'none':
         score_model = SEDDCond(cfg).to(device)
-    else:
-        score_model = SEDD(cfg).to(device)
     ema = ExponentialMovingAverage(score_model.parameters(), decay=cfg.training.ema)
 
     ckpt_dir = ckpt_dir if ckpt_dir else os.path.join(root_dir, "checkpoints-meta", "checkpoint.pth")
