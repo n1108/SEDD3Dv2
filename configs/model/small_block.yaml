@@ -1,0 +1,11 @@
+name: small_block
+type: ddit
+hidden_size: 576
+cond_dim: 128
+n_blocks: 5
+n_heads: 16
+scale_by_sigma: True
+dropout: 0.1
+patch_size: 4
+block_size: 2
+neighbor_direction: 'cross'

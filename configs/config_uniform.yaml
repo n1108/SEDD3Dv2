@@ -1,0 +1,87 @@
+defaults:
+  - _self_
+  - model: medium_uniform
+  - override hydra/launcher: submitit_slurm
+
+ngpus: 4
+tokens: 11
+
+image_size: [64, 64, 4]
+
+
+training:
+  batch_size: 96
+  accum: 1
+  n_iters: 1300001
+  snapshot_freq: 1000
+  log_freq: 500
+  eval_freq: 1000
+  snapshot_freq_for_preemption: 1000
+  weight: standard
+  snapshot_sampling: True
+  ema: 0.9999
+
+data:
+  dataset: carla
+  train_data_path: './data/CarlaSC_quantized_64_64_4/Cartesian/Train'
+  quantized_train_data_path: './data/CarlaSC_quantized_64_64_4/Cartesian/Train'
+  valid_data_path: './data/CarlaSC_quantized_64_64_4/Cartesian/Val'
+  quantized_valid_data_path: './data/CarlaSC_quantized_64_64_4/Cartesian/Val'
+  infer_data_path: ''
+  quantized_infer_data_path: ''
+  data_argumentation: true
+  prev_stage: 'none'  # choices: none, s_1, s_2
+  next_stage: 's_2.5'  # choices: s_1, s_2, s_3
+  prev_data_size: null
+  next_data_size: [64, 64, 4]
+  prev_scene_path: ''
+  infer_data_source: 'dataset'
+
+graph:
+  type: uniform
+  file: data
+  report_all: False
+
+noise:
+  type: loglinear
+  sigma_min: 1e-4
+  sigma_max: 20
+
+sampling:
+  predictor: euler
+  steps: 128
+  noise_removal: True
+
+eval:
+  batch_size: 96
+  perplexity: True
+  perplexity_batch_size: 32
+
+optim:
+  weight_decay: 0
+  optimizer: AdamW
+  lr: 3e-4
+  beta1: 0.9
+  beta2: 0.999
+  eps: 1e-8
+  warmup: 2500
+  grad_clip: 1.
+
+
+hydra:
+  run:
+    # dir: exp_local/${data.dataset}/${now:%Y.%m.%d}/${now:%H%M%S}
+    dir: exp_local/carla/2024.10.31/034531
+  sweep:
+    # dir: exp/${data.dataset}/${now:%Y.%m.%d}/${now:%H%M%S}
+    dir: exp_local/carla/2024.10.31/034531
+    subdir: ${hydra.job.num}
+  launcher:
+    max_num_timeout: 100000
+    # timeout_min: 10079
+    partition: g40x
+    account: stanford
+    mem_gb: 96
+    cpus_per_task: 40
+    gpus_per_node: ${ngpus}
+    constraint: null

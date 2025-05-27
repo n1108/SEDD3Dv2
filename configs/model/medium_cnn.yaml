@@ -1,0 +1,3 @@
+name: medium
+type: cnn
+init_size: 64

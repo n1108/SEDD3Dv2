@@ -1,0 +1,13 @@
+name: small
+type: ddit
+hidden_size: 576
+cond_dim: 128
+n_blocks: 5
+n_heads: 16
+scale_by_sigma: True
+dropout: 0.1
+patch_size: 2
+sr_scale: 2
+block_size: 2    
+image_block_size: 4   # patch_size*block_size
+neighbor_direction: 'ltf'
