@@ -402,8 +402,12 @@ class SEDDCond(nn.Module, PyTorchModelHubMixin):
         
         position_ids = transform(position_ids)   # B*block_len*(bs*bs*bs)*3
 
-        unfolded = cond.unfold(1, self.block_size_lr, self.block_size_lr).unfold(2, self.block_size_lr, self.block_size_lr).unfold(3, self.block_size_lr, self.block_size_lr)
-        unfolded = unfolded.contiguous().view(cond.shape[0], -1, self.block_size_lr, self.block_size_lr, self.block_size_lr)
+        indices_tmp = indices.reshape(indices.shape[0], h, w, u)
+        kernel_voxel_size = self.config.model.block_size * self.config.model.patch_size
+        unfolded = indices_tmp.unfold(1, kernel_voxel_size, kernel_voxel_size).unfold(2, kernel_voxel_size, kernel_voxel_size).unfold(3, kernel_voxel_size, kernel_voxel_size)
+        unfolded = unfolded.contiguous().view(indices_tmp.shape[0], -1, kernel_voxel_size, kernel_voxel_size, kernel_voxel_size)
+        # unfolded = cond.unfold(1, self.block_size_lr, self.block_size_lr).unfold(2, self.block_size_lr, self.block_size_lr).unfold(3, self.block_size_lr, self.block_size_lr)
+        # unfolded = unfolded.contiguous().view(cond.shape[0], -1, self.block_size_lr, self.block_size_lr, self.block_size_lr)
         block_sums = unfolded.sum(dim=[2, 3, 4])
         nonzero_blocks = (block_sums != 0)
         neighbor_indices = get_neighbor_indices(b, 
@@ -426,8 +430,9 @@ class SEDDCond(nn.Module, PyTorchModelHubMixin):
             # x4 = self.vocab_embed(indices_tmp[:,indices_tmp.shape[1]//2:,indices_tmp.shape[2]//2:,:], 
             #                       cond[:,cond.shape[1]//2:,cond.shape[2]//2:,:])
             # x = torch.cat((torch.cat((x1, x2), dim=3), torch.cat((x3, x4), dim=3)), dim=2)
-            indices_tmp = indices.reshape(indices.shape[0], h, w, u)
-            _, h_cond, w_cond, u_cond = cond.shape
+
+            # indices_tmp = indices.reshape(indices.shape[0], h, w, u)
+            # _, h_cond, w_cond, u_cond = cond.shape
 
             # 准备一个列表存放“每一行”拼好的结果
             rows = []
@@ -437,14 +442,14 @@ class SEDDCond(nn.Module, PyTorchModelHubMixin):
 
                 h_start = (h * i) // 4
                 h_end   = (h * (i + 1)) // 4
-                h_cond_start = (h_cond * i) // 4
-                h_cond_end   = (h_cond * (i + 1)) // 4
+                # h_cond_start = (h_cond * i) // 4
+                # h_cond_end   = (h_cond * (i + 1)) // 4
 
                 for j in range(4):  # 在width方向切4份
                     w_start = (w * j) // 4
                     w_end   = (w * (j + 1)) // 4
-                    w_cond_start = (w_cond * j) // 4
-                    w_cond_end   = (w_cond * (j + 1)) // 4
+                    # w_cond_start = (w_cond * j) // 4
+                    # w_cond_end   = (w_cond * (j + 1)) // 4
 
                     # 取出对应子块 (在 h, w 维度切片)
                     block_indices = indices_tmp[:, h_start:h_end, w_start:w_end, :]
