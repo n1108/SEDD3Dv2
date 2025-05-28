@@ -319,28 +319,19 @@ def unpatchify(x, c, p, hwu=None):
 
 
 class VoxelPatchEmbeddingMixin(nn.Module):
-    def __init__(self, dim, vocab_dim, hidden_size, patch_size, bias=True, cond=False):
+    def __init__(self, dim, vocab_dim, hidden_size, patch_size, bias=True):
         super().__init__()
-        self.cond = cond
         self.vocab_dim = vocab_dim
         self.embedding = nn.Embedding(vocab_dim, dim)
-        if cond:
-            dim *= 2
         self.proj = nn.Conv3d(dim, hidden_size, kernel_size=patch_size, stride=patch_size, bias=bias)
         nn.init.kaiming_uniform_(self.embedding.weight.data, a=math.sqrt(5))
         w = self.proj.weight.data
         nn.init.xavier_uniform_(w.view([w.shape[0], -1]))
         nn.init.constant_(self.proj.bias, 0)
 
-    def forward(self, x, cond):
+    def forward(self, x):
         voxels = x
         emb = self.embedding(voxels).permute(0, 4, 1, 2, 3) 
-        if self.cond:
-            one_hot_labels = F.one_hot(cond, num_classes=self.vocab_dim).permute(0, 4, 1, 2, 3).float()
-            interpolate_labels = F.interpolate(one_hot_labels, size=x.shape[1:], mode='trilinear')
-            cond = interpolate_labels.argmax(dim=1).byte()
-            cond = self.embedding(cond.long()).permute(0, 4, 1, 2, 3)  
-            emb = torch.cat([emb, cond], dim=1)
         emb = self.proj(emb)
         return emb
     
@@ -360,7 +351,7 @@ class SEDDCond(nn.Module, PyTorchModelHubMixin):
         self.absorb = config.graph.type == "absorb"
         vocab_size = config.tokens + (1 if self.absorb else 0)  # TODO: class 0 for absorb
 
-        self.vocab_embed = VoxelPatchEmbeddingMixin(config.model.hidden_size, vocab_size, config.model.hidden_size, config.model.patch_size, cond=True)
+        self.vocab_embed = VoxelPatchEmbeddingMixin(config.model.hidden_size, vocab_size, config.model.hidden_size, config.model.patch_size)
         self.sigma_map = TimestepEmbedder(config.model.cond_dim)
         self.rotary_emb = rotary.RotaryPositionEmbedding3D(image_size=np.array(config.image_size) // config.model.patch_size  * 2, 
                                                            hidden_size_head=config.model.hidden_size //  config.model.n_heads, )
@@ -457,10 +448,9 @@ class SEDDCond(nn.Module, PyTorchModelHubMixin):
 
                     # 取出对应子块 (在 h, w 维度切片)
                     block_indices = indices_tmp[:, h_start:h_end, w_start:w_end, :]
-                    block_cond = cond[:, h_cond_start:h_cond_end, w_cond_start:w_cond_end, :]
 
                     # 送进 vocab_embed
-                    x_ij = self.vocab_embed(block_indices, block_cond)
+                    x_ij = self.vocab_embed(block_indices)
                     row_blocks.append(x_ij)
 
                 # 把本行的 4 块在 dim=3 上拼接(沿 width 方向)
@@ -471,7 +461,7 @@ class SEDDCond(nn.Module, PyTorchModelHubMixin):
             x = torch.cat(rows, dim=2)
 
         else:
-            x = self.vocab_embed(indices.reshape(indices.shape[0], h, w, u), cond)
+            x = self.vocab_embed(indices.reshape(indices.shape[0], h, w, u))
         x = x.flatten(2).transpose(1, 2) 
         c = F.silu(self.sigma_map(sigma))
 
