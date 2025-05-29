@@ -22,10 +22,10 @@ training:
 
 data:
   dataset: carla
-  train_data_path: '/data/hqj/pdd_data/CarlaSC_quantized_128_128_8/Cartesian/Train'
-  quantized_train_data_path: '/data/hqj/pdd_data/CarlaSC_quantized_64_64_4/Cartesian/Train'
-  valid_data_path: '/data/hqj/pdd_data/CarlaSC_quantized_128_128_8/Cartesian/Val'
-  quantized_valid_data_path: '/data/hqj/pdd_data/CarlaSC_quantized_64_64_4/Cartesian/Val'
+  train_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_128_128_8/Cartesian/Train'
+  quantized_train_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_64_64_4/Cartesian/Train'
+  valid_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_128_128_8/Cartesian/Val'
+  quantized_valid_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_64_64_4/Cartesian/Val'
   infer_data_path: ''
   quantized_infer_data_path: ''
   data_argumentation: true

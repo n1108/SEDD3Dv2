@@ -22,10 +22,10 @@ training:
 
 data:
   dataset: kitti360
-  train_data_path: '/data/hqj/pdd_data/kitti360_128_128_32/kitti360_quantized_128_128_32/Train'
-  quantized_train_data_path: '/data/hqj/pdd_data/kitti360_64_64_16/kitti360_quantized_64_64_16/Train'
-  valid_data_path: '/data/hqj/pdd_data/kitti360_128_128_32/kitti360_quantized_128_128_32/Val'
-  quantized_valid_data_path: '/data/hqj/pdd_data/kitti360_64_64_16/kitti360_quantized_64_64_16/Val'
+  train_data_path: '/data/yutao_niu/pdd_data/kitti360_128_128_32/kitti360_quantized_128_128_32/Train'
+  quantized_train_data_path: '/data/yutao_niu/pdd_data/kitti360_64_64_16/kitti360_quantized_64_64_16/Train'
+  valid_data_path: '/data/yutao_niu/pdd_data/kitti360_128_128_32/kitti360_quantized_128_128_32/Val'
+  quantized_valid_data_path: '/data/yutao_niu/pdd_data/kitti360_64_64_16/kitti360_quantized_64_64_16/Val'
   infer_data_path: ''
   quantized_infer_data_path: ''
   data_argumentation: true
