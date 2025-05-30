@@ -146,8 +146,14 @@ def _run(rank, world_size, cfg):
     optimize_fn = losses.optimization_manager(cfg) 
     # Step functions are generic; they will receive current_image_size at call time.
     # Note: noise_module.module is passed to get_step_fn.
-    train_step_fn = losses.get_step_fn(noise.module, graph, True, optimize_fn, cfg.training.accum)
-    eval_step_fn = losses.get_step_fn(noise.module, graph, False, optimize_fn, cfg.training.accum) # accum usually 1 for eval
+    train_step_fn = losses.get_step_fn(
+        noise.module, graph, True, optimize_fn, cfg.training.accum,
+        rank, mprint, cfg.training.log_freq # 新增: rank, mprint_fn, log_opt_step_freq
+    )
+    eval_step_fn = losses.get_step_fn(
+        noise.module, graph, False, optimize_fn, cfg.training.accum, # accum for eval is usually 1
+        rank, mprint, cfg.training.eval_freq # eval_freq for consistency, though not used for batch logs
+    )
 
     num_train_steps = cfg.training.n_total_iters # Use n_total_iters from global config
     mprint(f"Starting training loop from optimizer_step {initial_step} up to {num_train_steps}.")
@@ -195,8 +201,7 @@ def _run(rank, world_size, cfg):
             if current_optimizer_step % cfg.training.log_freq == 0:
                 if world_size > 1: 
                     dist.all_reduce(loss_val, op=dist.ReduceOp.AVG) # Average loss across GPUs
-                mprint(f"optimizer_step: {current_optimizer_step}, stage_idx: {current_stage_idx} ({current_stage_cfg.name}), "
-                       f"training_loss: {loss_val.item():.5e}")
+                mprint(f"    training_loss: {loss_val.item():.5e}")
             
             # Snapshot for preemption
             if current_optimizer_step % cfg.training.snapshot_freq_for_preemption == 0 and rank == 0:

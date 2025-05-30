@@ -81,45 +81,77 @@ def optimization_manager(config):
     return optimize_fn
 
 
-def get_step_fn(noise, graph, train, optimize_fn, accum):
+def get_step_fn(noise, graph, train, optimize_fn, accum, rank, mprint_fn, log_opt_step_freq): # 新增参数
     loss_fn = get_loss_fn(noise, graph, train)
 
-    accum_iter = 0
-    total_loss = 0
+    accum_iter_count = 0 # 重命名以避免与外部作用域变量冲突
+    current_total_loss = 0 # 重命名以避免与外部作用域变量冲突
+    
+    # 用于存储当前日志周期内每个累积批次的损失 (仅 rank 0)
+    batch_losses_for_current_log_period = []
 
     def step_fn(state, batch, current_image_size, cond=None):
-        nonlocal accum_iter 
-        nonlocal total_loss
+        nonlocal accum_iter_count
+        nonlocal current_total_loss
+        nonlocal batch_losses_for_current_log_period
 
         model = state['model']
+        loss_to_report_for_main_log = torch.tensor(0.0, device=batch.device) # 初始化
 
         if train:
             optimizer = state['optimizer']
             scaler = state['scaler']
-            loss = loss_fn(model, batch, current_image_size, cond=cond).mean() / accum
             
-            scaler.scale(loss).backward()
+            # 计算当前这个小批次的原始损失 (不除以 accum)
+            current_batch_raw_loss = loss_fn(model, batch, current_image_size, cond=cond).mean()
+            # 用于反向传播的损失 (除以 accum)
+            loss_for_backward = current_batch_raw_loss / accum
+            
+            scaler.scale(loss_for_backward).backward()
 
-            accum_iter += 1
-            total_loss += loss.detach()
-            if accum_iter == accum:
-                accum_iter = 0
+            accum_iter_count += 1
+            current_total_loss += loss_for_backward.detach() # 累加的是已经除以 accum 的损失
 
-                state['step'] += 1
+            # 如果是 rank 0，收集当前原始批次损失用于后续可能的打印
+            if rank == 0:
+                batch_losses_for_current_log_period.append(current_batch_raw_loss.item())
+
+            if accum_iter_count == accum: # 优化器步骤将要发生
+                accum_iter_count = 0
+
+                state['step'] += 1 # 优化器步骤计数器增加
                 optimize_fn(optimizer, scaler, model.parameters(), step=state['step'])
                 state['ema'].update(model.parameters())
                 optimizer.zero_grad()
                 
-                loss = total_loss
-                total_loss = 0
-        else:
+                loss_to_report_for_main_log = current_total_loss # 这是累积后的平均损失
+                current_total_loss = 0 # 重置累积损失
+
+                # 如果是 rank 0 并且是主日志记录的优化器步骤
+                if rank == 0 and state['step'] % log_opt_step_freq == 0:
+                    mprint_fn(f"optimizer_step: {state['step']}")
+                    for i, ind_loss in enumerate(batch_losses_for_current_log_period):
+                        mprint_fn(f"    accum_batch: {i+1}/{accum}, raw_loss: {ind_loss:.5e}")
+                    batch_losses_for_current_log_period.clear() # 打印后清空
+                elif rank == 0: # 如果不是日志步骤，也清空列表，避免累积过多
+                    batch_losses_for_current_log_period.clear()
+            else:
+                loss_to_report_for_main_log = current_total_loss 
+        else: # 评估模式
             with torch.no_grad():
                 ema = state['ema']
                 ema.store(model.parameters())
                 ema.copy_to(model.parameters())
-                loss = loss_fn(model, batch, current_image_size, cond=cond).mean()
+                # 评估模式下，accum 通常为1，所以 "individual" 和 "accumulated" 是一样的
+                eval_loss = loss_fn(model, batch, current_image_size, cond=cond).mean()
+                loss_to_report_for_main_log = eval_loss
                 ema.restore(model.parameters())
+                
+                # 评估模式下不需要打印单个累积批次损失的逻辑
+                if rank == 0:
+                    batch_losses_for_current_log_period.clear()
 
-        return loss
+
+        return loss_to_report_for_main_log
 
     return step_fn
