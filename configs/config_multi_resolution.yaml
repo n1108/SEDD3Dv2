@@ -28,11 +28,11 @@ data:
   # 定义不同的训练阶段/分辨率
   stages:
     - name: "res_32_to_64"
-      prev_stage_token: 's_prev_res_1' # 用于模型内部加载条件或区分的标识符
-      next_stage_token: 's_curr_res_1'
+      prev_stage: 's_1.5' # 用于模型内部加载条件或区分的标识符
+      next_stage: 's_2.5'
       prev_data_size: [32, 32, 2]   # 作为条件的低分辨率数据尺寸
       image_size: [64, 64, 4]       # 当前阶段训练的目标图像尺寸 (next_data_size)
-      batch_size: 16                # 此阶段的 batch_size (per GPU)
+      batch_size: 16                # 此阶段的 batch_size
       train_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_64_64_4/Cartesian/Train'
       quantized_train_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_32_32_2/Cartesian/Train' # 条件数据
       valid_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_64_64_4/Cartesian/Val'
@@ -40,8 +40,8 @@ data:
       # n_iters_this_stage: 500000 # 可选：为此阶段分配的迭代次数
 
     - name: "res_64_to_128"
-      prev_stage_token: 's_prev_res_2'
-      next_stage_token: 's_curr_res_2'
+      prev_stage: 's_2.5'
+      next_stage: 's_3.5'
       prev_data_size: [64, 64, 4]
       image_size: [128, 128, 8]
       batch_size: 8 # 例如，分辨率更高，batch_size减小以适应显存
@@ -52,8 +52,8 @@ data:
       # n_iters_this_stage: 500000
 
     - name: "res_128_to_256"
-      prev_stage_token: 's_prev_res_3'
-      next_stage_token: 's_curr_res_3'
+      prev_stage: 's_3.5'
+      next_stage: 's_3'
       prev_data_size: [128, 128, 8]
       image_size: [256, 256, 16]
       batch_size: 4 # 分辨率更高，batch_size进一步减小

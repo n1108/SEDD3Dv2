@@ -32,9 +32,9 @@ class Rotary(torch.nn.Module):
 class RotaryPositionEmbedding3D(nn.Module):
     def __init__(
             self,
-            image_size,
+            # image_size,
             hidden_size_head,
-            cache=False,
+            # cache=False,
             custom_freqs=None,
             freqs_for='lang',
             theta=10000,
@@ -51,27 +51,56 @@ class RotaryPositionEmbedding3D(nn.Module):
             max_freq = max_freq,
             num_freqs=num_freqs,
         )
-        freqs = self.pos_emb.get_axial_freqs(image_size[0], image_size[1], image_size[2]).to(params_dtype)
-        self.register_buffer("freqs", freqs, persistent=False)
-        self.cache = cache
-        self.seq_len_cached = None
+        self.freqs_cache = {}
+        # freqs = self.pos_emb.get_axial_freqs(image_size[0], image_size[1], image_size[2]).to(params_dtype)
+        # self.register_buffer("freqs", freqs, persistent=False)
+        # self.cache = cache
+        # self.seq_len_cached = None
 
+    def _compute_freqs(self, image_size_patched_list, device): # <--- 新增辅助方法
+        # image_size_patched_list 是一个 Python list/tuple: [H_patch, W_patch, U_patch]
+        image_size_tuple = tuple(image_size_patched_list)
+        if image_size_tuple not in self.freqs_cache:
+            # print(f"RotaryEmbedding3D: Computing freqs for patched_size: {image_size_tuple}")
+            freqs = self.pos_emb.get_axial_freqs(
+                image_size_patched_list[0], 
+                image_size_patched_list[1], 
+                image_size_patched_list[2]
+            ).to(dtype=self.params_dtype, device=device)
+            self.freqs_cache[image_size_tuple] = freqs
+        return self.freqs_cache[image_size_tuple]
 
-    def forward(self, t, rope_position_ids, seperate_qkv=False):
+    def forward(self, t, rope_position_ids, current_patched_image_size, seperate_qkv=False):
+        # current_patched_image_size 是块化后的图像尺寸 [H_patch, W_patch, U_patch]
+        # t (输入张量) 用于获取 device
+        
+        if isinstance(current_patched_image_size, torch.Tensor):
+            patched_size_list = current_patched_image_size.cpu().tolist()
+        else: # 假设已经是 list 或 tuple
+            patched_size_list = list(current_patched_image_size)
+
+        # 使用辅助方法计算或获取 freqs
+        freqs_volume = self._compute_freqs(patched_size_list, t.device)
+
         x_coords = rope_position_ids[:, :, 0]
         y_coords = rope_position_ids[:, :, 1]
         z_coords = rope_position_ids[:, :, 2]
-        # breakpoint()
-        freqs = self.freqs[x_coords, y_coords, z_coords]   # batch, seq_len
+
+        # 确保坐标在 freqs_volume 的界限内
+        x_coords = torch.clamp(x_coords, 0, patched_size_list[0] - 1)
+        y_coords = torch.clamp(y_coords, 0, patched_size_list[1] - 1)
+        z_coords = torch.clamp(z_coords, 0, patched_size_list[2] - 1)
+        
+        freqs = freqs_volume[x_coords, y_coords, z_coords]   # batch, seq_len, (dim_head // 3)
+
         if seperate_qkv:
-            # dims are: batch, seq_len, head, dim
-            self.cos_cached = freqs.cos()[:, :, None, :]
-            self.sin_cached = freqs.sin()[:, :, None, :]
+            self.cos_cached = freqs.cos()[:, :, None, :] # B, S, 1, D_rot
+            self.sin_cached = freqs.sin()[:, :, None, :] # B, S, 1, D_rot
             return self.cos_cached, self.sin_cached
-        # dims are: batch, seq_len, qkv, head, dim
-        self.cos_cached = freqs.cos()[:, :, None, None, :].repeat(1,1,3,1,1)
-        self.sin_cached = freqs.sin()[:, :, None, None, :].repeat(1,1,3,1,1)
-        # This makes the transformation on v an identity.
+            
+        self.cos_cached = freqs.cos()[:, :, None, None, :].repeat(1,1,3,1,1) # B, S, 3, 1, D_rot
+        self.sin_cached = freqs.sin()[:, :, None, None, :].repeat(1,1,3,1,1) # B, S, 3, 1, D_rot
+        
         self.cos_cached[:,:,2,:,:].fill_(1.)
         self.sin_cached[:,:,2,:,:].fill_(0.)
             

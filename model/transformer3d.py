@@ -345,7 +345,7 @@ class SEDDCond(nn.Module, PyTorchModelHubMixin):
             config = OmegaConf.create(config)
 
         self.config = config
-        self.num_patches = self.config.image_size[0] * self.config.image_size[1] * self.config.image_size[2] // self.config.model.patch_size**3
+        # self.num_patches = self.config.image_size[0] * self.config.image_size[1] * self.config.image_size[2] // self.config.model.patch_size**3
         self.block_size_lr = self.config.model.block_size * self.config.model.patch_size // self.config.model.sr_scale
 
         self.absorb = config.graph.type == "absorb"
@@ -353,8 +353,13 @@ class SEDDCond(nn.Module, PyTorchModelHubMixin):
 
         self.vocab_embed = VoxelPatchEmbeddingMixin(config.model.hidden_size, vocab_size, config.model.hidden_size, config.model.patch_size)
         self.sigma_map = TimestepEmbedder(config.model.cond_dim)
-        self.rotary_emb = rotary.RotaryPositionEmbedding3D(image_size=np.array(config.image_size) // config.model.patch_size  * 2, 
-                                                           hidden_size_head=config.model.hidden_size //  config.model.n_heads, )
+        # self.rotary_emb = rotary.RotaryPositionEmbedding3D(image_size=np.array(config.image_size) // config.model.patch_size  * 2, 
+        #                                                    hidden_size_head=config.model.hidden_size //  config.model.n_heads, )
+        # RotaryEmbedding3D 初始化时不传入固定的 image_size
+        self.rotary_emb = rotary.RotaryPositionEmbedding3D(
+            hidden_size_head=config.model.hidden_size // config.model.n_heads,
+            # 保留其他 RotaryEmbedding3D 的参数 (theta, freqs_for 等)
+        )
         # self.rotary_emb = rotary.Rotary(config.model.hidden_size // config.model.n_heads)
 
 
@@ -377,23 +382,23 @@ class SEDDCond(nn.Module, PyTorchModelHubMixin):
         )
 
 
-    def forward(self, indices, cond, sigma):
+    def forward(self, indices, cond, sigma, image_size):
         b = indices.shape[0]
-        h, w, u = self.config.image_size
+        h, w, u = image_size[0], image_size[1], image_size[2]
         hwu=[h//self.config.model.patch_size, w//self.config.model.patch_size, u//self.config.model.patch_size]
         position_ids = torch.zeros(self.num_patches, 3, device=indices.device)
-        position_ids[:, 0] = torch.arange(self.num_patches) // (self.config.image_size[2] // self.config.model.patch_size) \
-                            // (self.config.image_size[1] // self.config.model.patch_size) \
-                            % (self.config.image_size[0] // self.config.model.patch_size)
-        position_ids[:, 1] = torch.arange(self.num_patches) // (self.config.image_size[2] // self.config.model.patch_size) \
-                            % (self.config.image_size[1] // self.config.model.patch_size)
-        position_ids[:, 2] = torch.arange(self.num_patches) % (self.config.image_size[2] // self.config.model.patch_size)
+        position_ids[:, 0] = torch.arange(self.num_patches) // (image_size[2] // self.config.model.patch_size) \
+                            // (image_size[1] // self.config.model.patch_size) \
+                            % (image_size[0] // self.config.model.patch_size)
+        position_ids[:, 1] = torch.arange(self.num_patches) // (image_size[2] // self.config.model.patch_size) \
+                            % (image_size[1] // self.config.model.patch_size)
+        position_ids[:, 2] = torch.arange(self.num_patches) % (image_size[2] // self.config.model.patch_size)
         position_ids = torch.repeat_interleave(position_ids.unsqueeze(0), indices.shape[0], dim=0).long()
         position_ids[position_ids==-1] = 0
         if hasattr(self.config.data, 'crop_size'):
-            position_ids[:,:,0] += torch.randint(0, self.config.image_size[0] // self.config.model.patch_size, (indices.shape[0], 1), device=indices.device)
-            position_ids[:,:,1] += torch.randint(0, self.config.image_size[1] // self.config.model.patch_size, (indices.shape[0], 1), device=indices.device)
-            position_ids[:,:,2] += torch.randint(0, self.config.image_size[2] // self.config.model.patch_size, (indices.shape[0], 1), device=indices.device)
+            position_ids[:,:,0] += torch.randint(0, image_size[0] // self.config.model.patch_size, (indices.shape[0], 1), device=indices.device)
+            position_ids[:,:,1] += torch.randint(0, image_size[1] // self.config.model.patch_size, (indices.shape[0], 1), device=indices.device)
+            position_ids[:,:,2] += torch.randint(0, image_size[2] // self.config.model.patch_size, (indices.shape[0], 1), device=indices.device)
 
         def transform(x):
             x = rearrange(x, 'b (n m l) d -> b n m l d', n=h//self.config.model.patch_size, m=w//self.config.model.patch_size, l=u//self.config.model.patch_size)
@@ -470,9 +475,12 @@ class SEDDCond(nn.Module, PyTorchModelHubMixin):
         x = x.flatten(2).transpose(1, 2) 
         c = F.silu(self.sigma_map(sigma))
 
-        rotary_cos_sin_query = self.rotary_emb(x, rope_position_ids_query, True)
-        rotary_cos_sin_key = self.rotary_emb(x, rope_position_ids_key, True)
+        # rotary_cos_sin_query = self.rotary_emb(x, rope_position_ids_query, True)
+        # rotary_cos_sin_key = self.rotary_emb(x, rope_position_ids_key, True)
         # rotary_cos_sin = self.rotary_emb(x)
+        current_patched_size_tensor = torch.tensor(hwu, device=x.device, dtype=torch.long) # 确保是 long tensor
+        rotary_cos_sin_query = self.rotary_emb(x, rope_position_ids_query, current_patched_size_tensor, True)
+        rotary_cos_sin_key = self.rotary_emb(x, rope_position_ids_key, current_patched_size_tensor, True)
 
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             for i in range(len(self.blocks)):

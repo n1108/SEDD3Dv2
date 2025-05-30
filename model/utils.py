@@ -14,7 +14,7 @@ def get_model_fn(model, train=False):
         A model function.
     """
 
-    def model_fn(x, cond, sigma):
+    def model_fn(x, cond, sigma, current_image_size=None): # <--- 新增 current_image_size
         """Compute the output of the score-based model.
 
         Args:
@@ -31,7 +31,7 @@ def get_model_fn(model, train=False):
             model.eval()
         
             # otherwise output the raw values (we handle mlm training in losses.py)
-        return model(x, cond, sigma)
+        return model(x, cond, sigma, current_image_size=current_image_size) # <--- 修改调用
 
     return model_fn
 
@@ -42,9 +42,9 @@ def get_score_fn(model, train=False, sampling=False):
     model_fn = get_model_fn(model, train=train)
 
     with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-        def score_fn(x, cond, sigma):
+        def score_fn(x, cond, sigma, current_image_size=None): # <--- 新增 current_image_size
             sigma = sigma.reshape(-1)
-            score = model_fn(x, cond, sigma)
+            score = model_fn(x, cond, sigma, current_image_size=current_image_size) # <--- 修改调用
             
             if sampling:
                 # when sampling return true score (not log used for training)
