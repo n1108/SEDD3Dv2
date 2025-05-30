@@ -9,9 +9,6 @@ tokens: 11 # 假设类别数固定
 
 # training 部分定义通用的训练参数
 training:
-  # batch_size 将在每个 stage 中定义，因为虽然您说保持一致，但为了灵活性，在此处允许覆盖
-  # 或者在这里定义一个全局 batch_size，如果所有阶段都严格一样
-  # global_batch_size: 16 # 例如, 这是指单个GPU的batch_size
   accum: 1 # 梯度累积步数，可以根据全局batch size和GPU数量调整
   n_total_iters: 2000000 # 总迭代次数，或者按 n_iters_per_stage * num_stages 计算
   snapshot_freq: 5000
@@ -74,7 +71,7 @@ data:
 # graph, noise, sampling, eval, optim 部分通常可以跨分辨率共享
 # 如果特定阶段需要不同设置，可以在训练循环中覆盖
 graph:
-  type: absorb_relay # 或 absorb，根据您的模型设计
+  type: absorb_relay
   file: data
   report_all: False
 
