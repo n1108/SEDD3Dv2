@@ -9,7 +9,7 @@ tokens: 11 # 假设类别数固定
 
 # training 部分定义通用的训练参数
 training:
-  accum: 1 # 梯度累积步数，可以根据全局batch size和GPU数量调整
+  accum: 2 # 梯度累积步数
   n_total_iters: 2000000 # 总迭代次数，或者按 n_iters_per_stage * num_stages 计算
   snapshot_freq: 5000
   log_freq: 100
@@ -32,7 +32,7 @@ data:
       next_stage: 's_2.5'
       prev_data_size: [32, 32, 2]   # 作为条件的低分辨率数据尺寸
       image_size: [64, 64, 4]       # 当前阶段训练的目标图像尺寸 (next_data_size)
-      batch_size: 16                # 此阶段的 batch_size
+      batch_size: 8                # 此阶段的 batch_size
       train_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_64_64_4/Cartesian/Train'
       quantized_train_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_32_32_2/Cartesian/Train' # 条件数据
       valid_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_64_64_4/Cartesian/Val'
@@ -44,24 +44,24 @@ data:
       next_stage: 's_3.5'
       prev_data_size: [64, 64, 4]
       image_size: [128, 128, 8]
-      batch_size: 8 # 例如，分辨率更高，batch_size减小以适应显存
+      batch_size: 4 # 例如，分辨率更高，batch_size减小以适应显存
       train_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_128_128_8/Cartesian/Train'
       quantized_train_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_64_64_4/Cartesian/Train'
       valid_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_128_128_8/Cartesian/Val'
       quantized_valid_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_64_64_4/Cartesian/Val'
       # n_iters_this_stage: 500000
 
-    - name: "res_128_to_256"
-      prev_stage: 's_3.5'
-      next_stage: 's_3'
-      prev_data_size: [128, 128, 8]
-      image_size: [256, 256, 16]
-      batch_size: 4 # 分辨率更高，batch_size进一步减小
-      train_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_256_256_16/Cartesian/Train'
-      quantized_train_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_128_128_8/Cartesian/Train'
-      valid_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_256_256_16/Cartesian/Val'
-      quantized_valid_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_128_128_8/Cartesian/Val'
-      # n_iters_this_stage: 1000000
+    # - name: "res_128_to_256"
+    #   prev_stage: 's_3.5'
+    #   next_stage: 's_3'
+    #   prev_data_size: [128, 128, 8]
+    #   image_size: [256, 256, 16]
+    #   batch_size: 1 # 分辨率更高，batch_size进一步减小
+    #   train_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_256_256_16/Cartesian/Train'
+    #   quantized_train_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_128_128_8/Cartesian/Train'
+    #   valid_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_256_256_16/Cartesian/Val'
+    #   quantized_valid_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_128_128_8/Cartesian/Val'
+    #   # n_iters_this_stage: 1000000
 
   # prev_scene_path 和 infer_data_path 通常用于推理，这里留空或按需配置
   prev_scene_path: ''
