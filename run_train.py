@@ -92,8 +92,7 @@ def _run(rank, world_size, cfg):
     graph = graph_lib.get_graph(cfg, device)
     
     # build score model
-    if cfg.data.prev_stage != 'none':
-        score_model = SEDDCond(cfg).to(device)
+    score_model = SEDDCond(cfg).to(device)
     score_model = DDP(score_model, device_ids=[rank], static_graph=True, find_unused_parameters=True)
 
     num_parameters = sum(p.numel() for p in score_model.parameters())
@@ -262,8 +261,8 @@ def _run(rank, world_size, cfg):
                     # Get condition data for sampling
                     s_cond_data = None
                     # Model's prev_stage flag (e.g. from cfg.model or global cfg.data.prev_stage)
-                    # This should ideally align with the sampling_stage_cfg.prev_stage_token
-                    model_is_conditional = sampling_stage_cfg.prev_stage_token != 'none'
+                    # This should ideally align with the sampling_stage_cfg.prev_stage
+                    model_is_conditional = sampling_stage_cfg.prev_stage != 'none'
 
                     if model_is_conditional:
                         # Get a non-distributed loader for sampling conditions on rank 0
