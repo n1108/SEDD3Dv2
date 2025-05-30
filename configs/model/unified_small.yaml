@@ -1,0 +1,14 @@
+# configs/model/unified_small.yaml
+name: unified_small_multires
+type: ddit # 假设模型类型不变
+hidden_size: 576
+cond_dim: 128
+n_blocks: 5
+n_heads: 16
+scale_by_sigma: True
+dropout: 0.1
+patch_size: 2 # 固定 patch_size，例如 2x2x2。您可以根据需求调整为4等。
+# block_size 和 image_block_size (patch_size * block_size) 也是固定的
+block_size: 2 # 用于稀疏注意力块的大小
+image_block_size: 4 # patch_size * block_size
+neighbor_direction: 'cross' # 或 'ltf'
