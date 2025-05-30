@@ -103,9 +103,11 @@ optim:
 
 hydra:
   run:
-    dir: exp_outputs/multires_${data.dataset}_${model.name}/${now:%Y.%m.%d}/${now:%H%M%S}
+    # dir: exp_outputs/multires_${data.dataset}_${model.name}/${now:%Y.%m.%d}/${now:%H%M%S}
+    dir: exp_outputs/multires_${data.dataset}_${model.name}/2025.05.31/000302
   sweep:
-    dir: exp_outputs/multires_${data.dataset}_${model.name}/${now:%Y.%m.%d}/${now:%H%M%S}
+    # dir: exp_outputs/multires_${data.dataset}_${model.name}/${now:%Y.%m.%d}/${now:%H%M%S}
+    dir: exp_outputs/multires_${data.dataset}_${model.name}/2025.05.31/000302
     subdir: ${hydra.job.num}
   launcher: # 根据您的环境配置
     max_num_timeout: 100000
