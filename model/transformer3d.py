@@ -345,8 +345,6 @@ class SEDDCond(nn.Module, PyTorchModelHubMixin):
             config = OmegaConf.create(config)
 
         self.config = config
-        # self.num_patches = self.config.image_size[0] * self.config.image_size[1] * self.config.image_size[2] // self.config.model.patch_size**3
-        self.block_size_lr = self.config.model.block_size * self.config.model.patch_size // self.config.model.sr_scale
 
         self.absorb = config.graph.type == "absorb"
         vocab_size = config.tokens + (1 if self.absorb else 0)  # TODO: class 0 for absorb
@@ -412,8 +410,6 @@ class SEDDCond(nn.Module, PyTorchModelHubMixin):
         kernel_voxel_size = self.config.model.block_size * self.config.model.patch_size
         unfolded = indices_tmp.unfold(1, kernel_voxel_size, kernel_voxel_size).unfold(2, kernel_voxel_size, kernel_voxel_size).unfold(3, kernel_voxel_size, kernel_voxel_size)
         unfolded = unfolded.contiguous().view(indices_tmp.shape[0], -1, kernel_voxel_size, kernel_voxel_size, kernel_voxel_size)
-        # unfolded = cond.unfold(1, self.block_size_lr, self.block_size_lr).unfold(2, self.block_size_lr, self.block_size_lr).unfold(3, self.block_size_lr, self.block_size_lr)
-        # unfolded = unfolded.contiguous().view(cond.shape[0], -1, self.block_size_lr, self.block_size_lr, self.block_size_lr)
         block_sums = unfolded.sum(dim=[2, 3, 4])
         nonzero_blocks = (block_sums != 0)
         neighbor_indices = get_neighbor_indices(b, 

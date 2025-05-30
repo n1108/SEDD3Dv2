@@ -18,17 +18,14 @@ def load_model_hf(dir, device):
 
 
 def load_model_local(root_dir, device, ckpt_dir=None):
-    cfg = utils.load_hydra_config_from_run(root_dir)
-    if hasattr(cfg.data, 'crop_size'):
-        del cfg.data.crop_size
-        cfg.image_size = cfg.data.next_data_size
-    if cfg.data.next_data_size[0] == 512:
-        cfg.image_size = [cfg.image_size[0]//2, cfg.image_size[1]//2, cfg.image_size[2]]
-    graph = graph_lib.get_graph(cfg, device)
-    noise = noise_lib.get_noise(cfg).to(device)
-    # build score model
-    if cfg.data.prev_stage != 'none':
-        score_model = SEDDCond(cfg).to(device)
+    cfg = utils.load_hydra_config_from_run(root_dir) # cfg is the multi-res config from the run
+
+    graph = graph_lib.get_graph(cfg, device) # cfg.tokens should be global
+    noise = noise_lib.get_noise(cfg).to(device) # noise params should be global
+    
+    # Instantiate the model, assuming SEDDCond for multi-resolution trained models
+    score_model = SEDDCond(cfg).to(device) # Model uses the loaded cfg for its init
+    
     ema = ExponentialMovingAverage(score_model.parameters(), decay=cfg.training.ema)
 
     ckpt_dir = ckpt_dir if ckpt_dir else os.path.join(root_dir, "checkpoints-meta", "checkpoint.pth")
@@ -40,7 +37,7 @@ def load_model_local(root_dir, device, ckpt_dir=None):
 
     ema.store(score_model.parameters())
     ema.copy_to(score_model.parameters())
-    return score_model, graph, noise, cfg
+    return score_model, graph, noise, cfg # Return the original loaded cfg
 
 
 def load_model(root_dir, device, ckpt_dir=None):
