@@ -291,6 +291,7 @@ def _run(rank, world_size, cfg):
                         eps=sampling_eps,
                         device=device,
                         cond=s_cond_data,
+                        current_image_size=sampling_image_size
                     )
                     
                     current_iter_sample_dir = os.path.join(sample_dir, f"iter_{current_optimizer_step}")

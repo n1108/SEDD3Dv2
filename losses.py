@@ -8,7 +8,7 @@ from model import utils as mutils
 
 def get_loss_fn(noise, graph, train, sampling_eps=1e-3, lv=False):
 
-    def loss_fn(model, batch, cond=None, t=None, perturbed_batch=None):
+    def loss_fn(model, batch, current_image_size, cond=None, t=None, perturbed_batch=None):
         """
         Batch shape: [B, L] int. D given from graph
         """
@@ -32,7 +32,7 @@ def get_loss_fn(noise, graph, train, sampling_eps=1e-3, lv=False):
             perturbed_batch = graph.sample_transition(batch, sigma[:, None], cond_expanded)
 
         log_score_fn = mutils.get_score_fn(model, train=train, sampling=False)
-        log_score = log_score_fn(perturbed_batch, cond, sigma)
+        log_score = log_score_fn(perturbed_batch, cond, sigma, current_image_size=current_image_size)
         loss = graph.score_entropy(log_score, sigma[:, None], perturbed_batch, batch, cond_expanded)
 
         loss = (dsigma[:, None] * loss).sum(dim=-1)
@@ -87,7 +87,7 @@ def get_step_fn(noise, graph, train, optimize_fn, accum):
     accum_iter = 0
     total_loss = 0
 
-    def step_fn(state, batch, cond=None):
+    def step_fn(state, batch, current_image_size, cond=None):
         nonlocal accum_iter 
         nonlocal total_loss
 
@@ -96,7 +96,7 @@ def get_step_fn(noise, graph, train, optimize_fn, accum):
         if train:
             optimizer = state['optimizer']
             scaler = state['scaler']
-            loss = loss_fn(model, batch, cond=cond).mean() / accum
+            loss = loss_fn(model, batch, current_image_size, cond=cond).mean() / accum
             
             scaler.scale(loss).backward()
 
@@ -117,7 +117,7 @@ def get_step_fn(noise, graph, train, optimize_fn, accum):
                 ema = state['ema']
                 ema.store(model.parameters())
                 ema.copy_to(model.parameters())
-                loss = loss_fn(model, batch, cond=cond).mean()
+                loss = loss_fn(model, batch, current_image_size, cond=cond).mean()
                 ema.restore(model.parameters())
 
         return loss

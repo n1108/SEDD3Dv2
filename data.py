@@ -48,8 +48,8 @@ def get_dataloaders(config, current_stage_config, distributed=True, prev_scene_p
         quantized_directory=current_stage_config.quantized_train_data_path,
         data_argumentation=config.data.data_argumentation, # 全局数据增强开关
         mode='train',
-        prev_stage=current_stage_config.prev_stage_token,
-        next_stage=current_stage_config.next_stage_token,
+        prev_stage=current_stage_config.prev_stage,
+        next_stage=current_stage_config.next_stage,
         prev_data_size=current_stage_config.prev_data_size,
         next_data_size=current_stage_config.image_size, # image_size 是目标尺寸
         # prev_scene_path 和 infer_data_source 可以来自全局 config.data
@@ -62,8 +62,8 @@ def get_dataloaders(config, current_stage_config, distributed=True, prev_scene_p
         quantized_directory=current_stage_config.quantized_valid_data_path,
         data_argumentation=False, # 验证集通常不使用数据增强
         mode='inference',
-        prev_stage=current_stage_config.prev_stage_token,
-        next_stage=current_stage_config.next_stage_token,
+        prev_stage=current_stage_config.prev_stage,
+        next_stage=current_stage_config.next_stage,
         prev_data_size=current_stage_config.prev_data_size,
         next_data_size=current_stage_config.image_size,
         # prev_scene_path 可以被特定调用的 prev_scene_path 参数覆盖 (主要用于采样脚本)

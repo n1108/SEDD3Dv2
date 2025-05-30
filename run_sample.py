@@ -283,6 +283,7 @@ def main():
     parser.add_argument("--ckpt_dir", type=str, default=None)
     parser.add_argument("--this_sample_dir", type=str, default=None)
     parser.add_argument("--prev_data_sr", type=int, nargs=3, default=None)
+    parser.add_argument("--sampling_stage_idx", type=int, default=-1, help="Index of the stage in config.data.stages to use for sampling (default: last stage).")
     args = parser.parse_args()
     ngpus = args.ngpus
 
