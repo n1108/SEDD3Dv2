@@ -43,6 +43,13 @@ class RotaryPositionEmbedding3D(nn.Module):
             params_dtype=torch.float32,
     ):
         super().__init__()
+        self.hidden_size_head = hidden_size_head
+        self.custom_freqs = custom_freqs
+        self.freqs_for = freqs_for
+        self.theta = theta
+        self.max_freq = max_freq
+        self.num_freqs = num_freqs
+        self.params_dtype = params_dtype
         self.pos_emb = RotaryEmbedding(
             custom_freqs=custom_freqs,
             theta=theta,

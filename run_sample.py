@@ -49,7 +49,7 @@ def _run(rank, world_size, args): # args are from argparse
             "name": "global_fallback",
             "image_size": cfg_loaded.image_size, # Must exist in old config
             "prev_data_size": cfg_loaded.data.prev_data_size if hasattr(cfg_loaded.data, 'prev_data_size') else None,
-            "prev_stage_token": cfg_loaded.data.prev_stage if hasattr(cfg_loaded.data, 'prev_stage') else 'none',
+            "prev_stage": cfg_loaded.data.prev_stage if hasattr(cfg_loaded.data, 'prev_stage') else 'none',
             "batch_size": cfg_loaded.eval.batch_size, # Use eval batch size
             # Fill other fields if dataloader needs them (e.g. paths, though likely not for unconditional)
             "train_data_path": None, "quantized_train_data_path": None, 
@@ -101,8 +101,8 @@ def _run(rank, world_size, args): # args are from argparse
     this_sample_dir = args.this_sample_dir if args.this_sample_dir else os.path.join(sample_dir_base, current_sampling_stage_cfg.name)
     utils.makedirs(os.path.join(this_sample_dir, 'generated'))
 
-    # Determine if model is conditional based on the *sampling stage's* prev_stage_token
-    model_is_conditional_for_sampling = current_sampling_stage_cfg.prev_stage_token != 'none'
+    # Determine if model is conditional based on the *sampling stage's* prev_stage
+    model_is_conditional_for_sampling = current_sampling_stage_cfg.prev_stage != 'none'
     
     eval_iter = None
     if model_is_conditional_for_sampling:
