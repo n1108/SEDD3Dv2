@@ -386,13 +386,14 @@ class SEDDCond(nn.Module, PyTorchModelHubMixin):
         b = indices.shape[0]
         h, w, u = image_size[0], image_size[1], image_size[2]
         hwu=[h//self.config.model.patch_size, w//self.config.model.patch_size, u//self.config.model.patch_size]
-        position_ids = torch.zeros(self.num_patches, 3, device=indices.device)
-        position_ids[:, 0] = torch.arange(self.num_patches) // (image_size[2] // self.config.model.patch_size) \
+        num_patches = hwu[0] * hwu[1] * hwu[2]
+        position_ids = torch.zeros(num_patches, 3, device=indices.device)
+        position_ids[:, 0] = torch.arange(num_patches) // (image_size[2] // self.config.model.patch_size) \
                             // (image_size[1] // self.config.model.patch_size) \
                             % (image_size[0] // self.config.model.patch_size)
-        position_ids[:, 1] = torch.arange(self.num_patches) // (image_size[2] // self.config.model.patch_size) \
+        position_ids[:, 1] = torch.arange(num_patches) // (image_size[2] // self.config.model.patch_size) \
                             % (image_size[1] // self.config.model.patch_size)
-        position_ids[:, 2] = torch.arange(self.num_patches) % (image_size[2] // self.config.model.patch_size)
+        position_ids[:, 2] = torch.arange(num_patches) % (image_size[2] // self.config.model.patch_size)
         position_ids = torch.repeat_interleave(position_ids.unsqueeze(0), indices.shape[0], dim=0).long()
         position_ids[position_ids==-1] = 0
         if hasattr(self.config.data, 'crop_size'):

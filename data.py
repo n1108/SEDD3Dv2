@@ -83,12 +83,10 @@ def get_dataloaders(config, current_stage_config, distributed=True, prev_scene_p
         train_sampler = None
         test_sampler = None
     
-    train_loader_batch_size = current_stage_config.batch_size
-    eval_loader_batch_size = current_stage_config.get('eval_batch_size', current_stage_config.batch_size)
 
     train_loader = cycle_loader(DataLoader(
         train_set,
-        batch_size=train_loader_batch_size // (config.ngpus * config.training.accum),
+        batch_size=current_stage_config.batch_size // config.training.accum,
         sampler=train_sampler,
         num_workers=4,
         collate_fn=train_set.collate_fn,
@@ -98,7 +96,7 @@ def get_dataloaders(config, current_stage_config, distributed=True, prev_scene_p
     ))
     valid_loader = cycle_loader(DataLoader(
         valid_set,
-        batch_size=eval_batch_size if eval_batch_size else eval_loader_batch_size // (config.ngpus * config.training.accum),
+        batch_size=stage_eval_batch_size // config.training.accum, # (通常 eval 时 accum=1)
         sampler=test_sampler,
         num_workers=4,
         collate_fn=valid_set.collate_fn,

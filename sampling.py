@@ -42,7 +42,7 @@ class Predictor(abc.ABC):
         self.noise = noise
 
     @abc.abstractmethod
-    def update_fn(self, score_fn, x, t, step_size):
+    def update_fn(self, score_fn, x, t, step_size, current_image_size):
         """One update of the predictor.
 
         Args:
@@ -58,9 +58,9 @@ class Predictor(abc.ABC):
 
 @register_predictor(name="euler")
 class EulerPredictor(Predictor):
-    def update_fn(self, score_fn, x, t, step_size, cond=None, cond_expanded=None):
+    def update_fn(self, score_fn, x, t, step_size, cond=None, cond_expanded=None, current_image_size=None):
         sigma, dsigma = self.noise(t)
-        score = score_fn(x, cond, sigma)
+        score = score_fn(x, cond, sigma, current_image_size=current_image_size)
 
         if cond is not None:
             cond = cond_expanded
@@ -70,18 +70,18 @@ class EulerPredictor(Predictor):
 
 @register_predictor(name="none")
 class NonePredictor(Predictor):
-    def update_fn(self, score_fn, x, t, step_size):
+    def update_fn(self, score_fn, x, t, step_size, current_image_size):
         return x
 
 
 @register_predictor(name="analytic")
 class AnalyticPredictor(Predictor):
-    def update_fn(self, score_fn, x, t, step_size, cond=None, cond_expanded=None):
+    def update_fn(self, score_fn, x, t, step_size, cond=None, cond_expanded=None, current_image_size=None):
         curr_sigma = self.noise(t)[0]
         next_sigma = self.noise(t - step_size)[0]
         dsigma = curr_sigma - next_sigma
 
-        score = score_fn(x, cond, curr_sigma)
+        score = score_fn(x, cond, curr_sigma, current_image_size=current_image_size)
         if cond is not None:
             cond = cond_expanded
 
@@ -95,10 +95,10 @@ class Denoiser:
         self.graph = graph
         self.noise = noise
 
-    def update_fn(self, score_fn, x, t, cond=None, cond_expanded=None):
+    def update_fn(self, score_fn, x, t, cond=None, cond_expanded=None, current_image_size=None):
         sigma = self.noise(t)[0]
 
-        score = score_fn(x, cond, sigma)
+        score = score_fn(x, cond, sigma, current_image_size=current_image_size)
         if cond is not None:
             cond = cond_expanded
         stag_score = self.graph.staggered_score(score, sigma, cond)
@@ -126,7 +126,7 @@ def get_sampling_fn(config, graph, noise, batch_dims, eps, device, cond=None):
     return sampling_fn
     
 
-def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps=1e-5, device=torch.device('cpu'), proj_fun=lambda x: x, cond=None):
+def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps=1e-5, device=torch.device('cpu'), proj_fun=lambda x: x, cond=None, current_image_size=None): # Added current_image_size
     predictor = get_predictor(predictor)(graph, noise)
     projector = proj_fun
     denoiser = Denoiser(graph, noise)
@@ -147,14 +147,14 @@ def get_pc_sampler(graph, noise, batch_dims, predictor, steps, denoise=True, eps
         for i in range(steps):
             t = timesteps[i] * torch.ones(x.shape[0], 1, device=device)
             x = projector(x)
-            x = predictor.update_fn(sampling_score_fn, x, t, dt, cond=cond, cond_expanded=cond_expanded)
+            x = predictor.update_fn(sampling_score_fn, x, t, dt, cond=cond, cond_expanded=cond_expanded, current_image_size=current_image_size)
             
 
         if denoise:
             # denoising step
             x = projector(x)
             t = timesteps[-1] * torch.ones(x.shape[0], 1, device=device)
-            x = denoiser.update_fn(sampling_score_fn, x, t, cond=cond, cond_expanded=cond_expanded)
+            x = denoiser.update_fn(sampling_score_fn, x, t, cond=cond, cond_expanded=cond_expanded, current_image_size=current_image_size)
             
         return x
     

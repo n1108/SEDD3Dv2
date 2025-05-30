@@ -197,6 +197,7 @@ def _run(rank, world_size, args): # args are from argparse
             eps=sampling_eps,
             device=device,
             cond=current_batch_cond_data,
+            current_image_size=current_image_size # Crucial
         )
         
         generated_output_batch = _pc_sampler_fn(model) # model is already unwrapped
