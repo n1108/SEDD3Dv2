@@ -11,3 +11,5 @@ sr_scale: 2
 block_size: 2    
 image_block_size: 4   # patch_size*block_size
 neighbor_direction: 'cross'
+spatial_freq_emb_size: 128   # ResolutionEmbedder 中每个空间维度的频率嵌入大小
+max_period_spatial: 1000     # ResolutionEmbedder 中正弦编码的最大周期

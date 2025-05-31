@@ -110,6 +110,70 @@ class LabelEmbedder(nn.Module):
     def forward(self, labels):
         embeddings = self.embedding_table(labels)
         return embeddings
+    
+
+class ResolutionEmbedder(nn.Module):
+    """
+    Embeds 3D resolution (H_patch, W_patch, U_patch) into vector representations.
+    """
+    def __init__(self, cond_dim, spatial_freq_emb_size=128, max_period_spatial=1000):
+        super().__init__()
+        self.cond_dim = cond_dim
+        self.spatial_freq_emb_size = spatial_freq_emb_size # Sinusoidal embedding size for EACH spatial dimension
+        self.max_period_spatial = max_period_spatial
+
+        # MLP to process concatenated sinusoidal embeddings of H_patch, W_patch, U_patch
+        # Input to MLP will be 3 * spatial_freq_emb_size
+        self.mlp = nn.Sequential(
+            nn.Linear(3 * self.spatial_freq_emb_size, cond_dim * 2), # Intermediate layer
+            nn.SiLU(),
+            nn.Linear(cond_dim * 2, cond_dim)
+        )
+        self.mlp[0].weight.data.normal_(0, 0.02) # Initialize MLP like DiT
+        self.mlp[0].bias.data.zero_()
+        self.mlp[2].weight.data.normal_(0, 0.02)
+        self.mlp[2].bias.data.zero_()
+
+
+    def _sinusoidal_embedding(self, value_tensor, dim):
+        """
+        Create sinusoidal embeddings for a batch of scalar values.
+        :param value_tensor: a 1-D Tensor of N values.
+        :param dim: the dimension of the output.
+        :return: an (N, D) Tensor of positional embeddings.
+        """
+        half = dim // 2
+        freqs = torch.exp(
+            -math.log(self.max_period_spatial) * torch.arange(start=0, end=half, dtype=torch.float32) / half
+        ).to(device=value_tensor.device)
+        
+        args = value_tensor.float().unsqueeze(-1) * freqs.unsqueeze(0)
+        
+        embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
+        if dim % 2: 
+            embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
+        return embedding
+
+    def forward(self, hwu_tensor_batch):
+        """
+        :param hwu_tensor_batch: A tensor of shape (B, 3) representing (H_patch, W_patch, U_patch) for each item in batch.
+        """
+        if hwu_tensor_batch.ndim == 1: 
+            hwu_tensor_batch = hwu_tensor_batch.unsqueeze(0)
+        
+        B = hwu_tensor_batch.shape[0]
+
+        h_p = hwu_tensor_batch[:, 0] 
+        w_p = hwu_tensor_batch[:, 1] 
+        u_p = hwu_tensor_batch[:, 2] 
+
+        h_emb = self._sinusoidal_embedding(h_p, self.spatial_freq_emb_size) 
+        w_emb = self._sinusoidal_embedding(w_p, self.spatial_freq_emb_size) 
+        u_emb = self._sinusoidal_embedding(u_p, self.spatial_freq_emb_size) 
+
+        concatenated_emb = torch.cat([h_emb, w_emb, u_emb], dim=-1) 
+        res_emb = self.mlp(concatenated_emb) 
+        return res_emb
 
 
 #################################################################################
@@ -352,14 +416,16 @@ class SEDDCond(nn.Module, PyTorchModelHubMixin):
 
         self.vocab_embed = VoxelPatchEmbeddingMixin(config.model.hidden_size, vocab_size, config.model.hidden_size, config.model.patch_size)
         self.sigma_map = TimestepEmbedder(config.model.cond_dim)
-        # self.rotary_emb = rotary.RotaryPositionEmbedding3D(image_size=np.array(config.image_size) // config.model.patch_size  * 2, 
-        #                                                    hidden_size_head=config.model.hidden_size //  config.model.n_heads, )
-        # RotaryEmbedding3D 初始化时不传入固定的 image_size
+
+        spatial_freq_emb_size = config.model.get('spatial_freq_emb_size', 128) 
+        max_period_spatial = config.model.get('max_period_spatial', 1000)    
+        self.res_map = ResolutionEmbedder(config.model.cond_dim, 
+                                          spatial_freq_emb_size=spatial_freq_emb_size,
+                                          max_period_spatial=max_period_spatial)
+
         self.rotary_emb = rotary.RotaryPositionEmbedding3D(
             hidden_size_head=config.model.hidden_size // config.model.n_heads,
-            # 保留其他 RotaryEmbedding3D 的参数 (theta, freqs_for 等)
         )
-        # self.rotary_emb = rotary.Rotary(config.model.hidden_size // config.model.n_heads)
 
 
 
@@ -473,7 +539,13 @@ class SEDDCond(nn.Module, PyTorchModelHubMixin):
         else:
             x = self.vocab_embed(indices.reshape(indices.shape[0], h, w, u))
         x = x.flatten(2).transpose(1, 2) 
-        c = F.silu(self.sigma_map(sigma))
+        # c = F.silu(self.sigma_map(sigma))
+
+        sigma_emb = self.sigma_map(sigma) # (B, cond_dim)
+        hwu_tensor_batch = torch.tensor(hwu, device=indices.device, dtype=torch.float32).repeat(b, 1)
+        res_emb = self.res_map(hwu_tensor_batch) # (B, cond_dim)
+
+        c = F.silu(sigma_emb + res_emb) # 将时间和分辨率嵌入相加，然后通过 SiLU
 
         # rotary_cos_sin_query = self.rotary_emb(x, rope_position_ids_query, True)
         # rotary_cos_sin_key = self.rotary_emb(x, rope_position_ids_key, True)
