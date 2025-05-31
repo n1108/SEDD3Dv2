@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import math
+import torch.utils.checkpoint as checkpoint
 
 from einops import rearrange
 from flash_attn.flash_attn_interface import flash_attn_varlen_qkvpacked_func
@@ -483,15 +484,27 @@ class SEDDCond(nn.Module, PyTorchModelHubMixin):
 
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
             for i in range(len(self.blocks)):
-                x = self.blocks[i](x, 
-                                   rotary_cos_sin_query=rotary_cos_sin_query, 
-                                   rotary_cos_sin_key=rotary_cos_sin_key, 
-                                   nonzero_blocks=nonzero_blocks, 
-                                   nonzero_blocks_neighbor=nonzero_blocks_neighbor, 
-                                   hwu=hwu,
-                                   c=c, 
-                                   seqlens=None)
-
+            #     x = self.blocks[i](x, 
+            #                        rotary_cos_sin_query=rotary_cos_sin_query, 
+            #                        rotary_cos_sin_key=rotary_cos_sin_key, 
+            #                        nonzero_blocks=nonzero_blocks, 
+            #                        nonzero_blocks_neighbor=nonzero_blocks_neighbor, 
+            #                        hwu=hwu,
+            #                        c=c, 
+            #                        seqlens=None)
+                x = checkpoint.checkpoint(
+                    self.blocks[i],                  # 要 checkpoint 的模块
+                    x,                               # 第一个参数
+                    c,                               # 第二个参数 (c)
+                    rotary_cos_sin_query,            # ...
+                    rotary_cos_sin_key,
+                    nonzero_blocks,
+                    nonzero_blocks_neighbor,
+                    hwu,
+                    None,                            # seqlens
+                    use_reentrant=True              # 对于较新 PyTorch 版本，推荐 False 以获得更好性能和兼容性
+                                                    # 如果使用旧版本或遇到问题，可以尝试 True
+                )
             x = self.output_layer(x, c, hwu)
 
 

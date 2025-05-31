@@ -9,7 +9,7 @@ tokens: 11 # 假设类别数固定
 
 # training 部分定义通用的训练参数
 training:
-  accum: 2 # <--- 全局梯度累积步数 (累积多少个微批次后进行一次优化器更新)
+  accum: 3 # <--- 全局梯度累积步数 (累积多少个微批次后进行一次优化器更新)
   n_total_iters: 2000000 # <--- 总的优化器步骤数
   snapshot_freq: 5000
   log_freq: 100 # <--- 日志记录频率 (按优化器步骤)
@@ -52,17 +52,17 @@ data:
       quantized_valid_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_64_64_4/Cartesian/Val'
       eval_batch_size: 4
 
-    # - name: "res_128_to_256"
-    #   prev_stage: 's_3.5'
-    #   next_stage: 's_3'
-    #   prev_data_size: [128, 128, 8]
-    #   image_size: [256, 256, 16]
-    #   batch_size: 1 # 分辨率更高，batch_size进一步减小
-    #   train_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_256_256_16/Cartesian/Train'
-    #   quantized_train_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_128_128_8/Cartesian/Train'
-    #   valid_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_256_256_16/Cartesian/Val'
-    #   quantized_valid_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_128_128_8/Cartesian/Val'
-    #   eval_batch_size: 1
+    - name: "res_128_to_256"
+      prev_stage: 's_3.5'
+      next_stage: 's_3'
+      prev_data_size: [128, 128, 8]
+      image_size: [256, 256, 16]
+      batch_size: 1 # 分辨率更高，batch_size进一步减小
+      train_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_256_256_16/Cartesian/Train'
+      quantized_train_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_128_128_8/Cartesian/Train'
+      valid_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_256_256_16/Cartesian/Val'
+      quantized_valid_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_128_128_8/Cartesian/Val'
+      eval_batch_size: 1
 
   prev_scene_path: ''
   infer_data_path: ''
@@ -99,11 +99,11 @@ optim:
 
 hydra:
   run:
-    # dir: exp_outputs/multires_${data.dataset}_${model.name}/${now:%Y.%m.%d}/${now:%H%M%S}
-    dir: exp_outputs/multires_carla_unified_small_multires/2025.05.31/151553
+    dir: exp_outputs/multires_${data.dataset}_${model.name}/${now:%Y.%m.%d}/${now:%H%M%S}
+    # dir: exp_outputs/multires_carla_unified_small_multires/2025.05.31/151553
   sweep:
-    # dir: exp_outputs/multires_${data.dataset}_${model.name}/${now:%Y.%m.%d}/${now:%H%M%S}
-    dir: exp_outputs/multires_carla_unified_small_multires/2025.05.31/151553
+    dir: exp_outputs/multires_${data.dataset}_${model.name}/${now:%Y.%m.%d}/${now:%H%M%S}
+    # dir: exp_outputs/multires_carla_unified_small_multires/2025.05.31/151553
     subdir: ${hydra.job.num}
   launcher: 
     max_num_timeout: 100000
