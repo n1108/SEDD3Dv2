@@ -539,12 +539,12 @@ class SEDDCond(nn.Module, PyTorchModelHubMixin):
         else:
             x = self.vocab_embed(indices.reshape(indices.shape[0], h, w, u))
         x = x.flatten(2).transpose(1, 2) 
-        # c = F.silu(self.sigma_map(sigma))
 
         sigma_emb = self.sigma_map(sigma) # (B, cond_dim)
         hwu_tensor_batch = torch.tensor(hwu, device=indices.device, dtype=torch.float32).repeat(b, 1)
         res_emb = self.res_map(hwu_tensor_batch) # (B, cond_dim)
-
+        
+        # c = F.silu(self.sigma_map(sigma))
         c = F.silu(sigma_emb + res_emb) # 将时间和分辨率嵌入相加，然后通过 SiLU
 
         # rotary_cos_sin_query = self.rotary_emb(x, rope_position_ids_query, True)
@@ -554,17 +554,14 @@ class SEDDCond(nn.Module, PyTorchModelHubMixin):
         rotary_cos_sin_query = self.rotary_emb(x, rope_position_ids_query, current_patched_size_tensor, True)
         rotary_cos_sin_key = self.rotary_emb(x, rope_position_ids_key, current_patched_size_tensor, True)
 
+        target_resolution_for_checkpointing = [256, 256, 16]
+        enable_checkpointing = (list(current_image_size) == target_resolution_for_checkpointing)
+
         with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-            for i in range(len(self.blocks)):
-            #     x = self.blocks[i](x, 
-            #                        rotary_cos_sin_query=rotary_cos_sin_query, 
-            #                        rotary_cos_sin_key=rotary_cos_sin_key, 
-            #                        nonzero_blocks=nonzero_blocks, 
-            #                        nonzero_blocks_neighbor=nonzero_blocks_neighbor, 
-            #                        hwu=hwu,
-            #                        c=c, 
-            #                        seqlens=None)
-                x = checkpoint.checkpoint(
+            if enable_checkpointing:
+                # print(f"DEBUG: Using checkpoint at resolution {current_image_size}") # 可选的调试信息
+                for i in range(len(self.blocks)):
+                    x = checkpoint.checkpoint(
                     self.blocks[i],                  # 要 checkpoint 的模块
                     x,                               # 第一个参数
                     c,                               # 第二个参数 (c)
@@ -577,6 +574,18 @@ class SEDDCond(nn.Module, PyTorchModelHubMixin):
                     use_reentrant=True              # 对于较新 PyTorch 版本，推荐 False 以获得更好性能和兼容性
                                                     # 如果使用旧版本或遇到问题，可以尝试 True
                 )
+            else:
+                # print(f"DEBUG: Using direct call at resolution {current_image_size}") # 可选的调试信息
+                for i in range(len(self.blocks)):
+                    x = self.blocks[i](x, 
+                                   rotary_cos_sin_query=rotary_cos_sin_query, 
+                                   rotary_cos_sin_key=rotary_cos_sin_key, 
+                                   nonzero_blocks=nonzero_blocks, 
+                                   nonzero_blocks_neighbor=nonzero_blocks_neighbor, 
+                                   hwu=hwu,
+                                   c=c, 
+                                   seqlens=None)
+                
             x = self.output_layer(x, c, hwu)
 
 

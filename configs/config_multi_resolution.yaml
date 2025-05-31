@@ -99,11 +99,13 @@ optim:
 
 hydra:
   run:
-    dir: exp_outputs/multires_${data.dataset}_${model.name}/${now:%Y.%m.%d}/${now:%H%M%S}
-    # dir: exp_outputs/multires_carla_unified_small_multires/2025.05.31/151553
+    # dir: exp_outputs/multires_${data.dataset}_${model.name}/${now:%Y.%m.%d}/${now:%H%M%S}
+    # dir: exp_outputs/multires_carla_unified_small_multires/2025.05.31/191622
+    dir: exp_outputs/multires_carla_unified_small_multires/2025.05.31/170817
   sweep:
-    dir: exp_outputs/multires_${data.dataset}_${model.name}/${now:%Y.%m.%d}/${now:%H%M%S}
-    # dir: exp_outputs/multires_carla_unified_small_multires/2025.05.31/151553
+    # dir: exp_outputs/multires_${data.dataset}_${model.name}/${now:%Y.%m.%d}/${now:%H%M%S}
+    # dir: exp_outputs/multires_carla_unified_small_multires/2025.05.31/191622
+    dir: exp_outputs/multires_carla_unified_small_multires/2025.05.31/170817
     subdir: ${hydra.job.num}
   launcher: 
     max_num_timeout: 100000
