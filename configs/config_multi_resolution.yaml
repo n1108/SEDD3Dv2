@@ -1,7 +1,7 @@
 # configs/config_multi_resolution.yaml
 defaults:
   - _self_
-  - model: unified_small # 指向上面定义的模型配置文件
+  - model: unified_small # 指向下面定义的模型配置文件
   - override hydra/launcher: submitit_slurm # 或者您常用的启动器
 
 ngpus: 4
@@ -9,15 +9,16 @@ tokens: 11 # 假设类别数固定
 
 # training 部分定义通用的训练参数
 training:
-  accum: 2 # 梯度累积步数
-  n_total_iters: 2000000 # 总迭代次数，或者按 n_iters_per_stage * num_stages 计算
+  accum: 2 # <--- 全局梯度累积步数 (累积多少个微批次后进行一次优化器更新)
+  n_total_iters: 2000000 # <--- 总的优化器步骤数
   snapshot_freq: 5000
-  log_freq: 100
-  eval_freq: 1000
+  log_freq: 100 # <--- 日志记录频率 (按优化器步骤)
+  eval_freq: 1000 # <--- 评估频率 (按优化器步骤)
   snapshot_freq_for_preemption: 1000
   weight: standard
   snapshot_sampling: True
   ema: 0.9999
+  sampling_stage_idx: -1 # 用于快照采样时，选择哪个stage进行采样，-1表示最后一个
 
 # data 部分现在包含一个 stages 列表
 data:
@@ -28,28 +29,28 @@ data:
   # 定义不同的训练阶段/分辨率
   stages:
     - name: "res_32_to_64"
-      prev_stage: 's_1.5' # 用于模型内部加载条件或区分的标识符
+      prev_stage: 's_1.5' 
       next_stage: 's_2.5'
-      prev_data_size: [32, 32, 2]   # 作为条件的低分辨率数据尺寸
-      image_size: [64, 64, 4]       # 当前阶段训练的目标图像尺寸 (next_data_size)
-      batch_size: 8                # 此阶段的 batch_size
+      prev_data_size: [32, 32, 2]  
+      image_size: [64, 64, 4]      # 当前阶段训练的目标图像尺寸 (H, W, U)
+      batch_size: 8                # <--- 此阶段的单GPU微批次大小
       train_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_64_64_4/Cartesian/Train'
-      quantized_train_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_32_32_2/Cartesian/Train' # 条件数据
+      quantized_train_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_32_32_2/Cartesian/Train' 
       valid_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_64_64_4/Cartesian/Val'
       quantized_valid_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_32_32_2/Cartesian/Val'
-      # n_iters_this_stage: 500000 # 可选：为此阶段分配的迭代次数
+      eval_batch_size: 8 # <--- (可选) 此阶段评估时的单GPU批大小，若无则用训练的 batch_size
 
     - name: "res_64_to_128"
       prev_stage: 's_2.5'
       next_stage: 's_3.5'
       prev_data_size: [64, 64, 4]
       image_size: [128, 128, 8]
-      batch_size: 4 # 例如，分辨率更高，batch_size减小以适应显存
+      batch_size: 4 # <--- 此阶段的单GPU微批次大小
       train_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_128_128_8/Cartesian/Train'
       quantized_train_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_64_64_4/Cartesian/Train'
       valid_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_128_128_8/Cartesian/Val'
       quantized_valid_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_64_64_4/Cartesian/Val'
-      # n_iters_this_stage: 500000
+      eval_batch_size: 4
 
     # - name: "res_128_to_256"
     #   prev_stage: 's_3.5'
@@ -61,15 +62,12 @@ data:
     #   quantized_train_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_128_128_8/Cartesian/Train'
     #   valid_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_256_256_16/Cartesian/Val'
     #   quantized_valid_data_path: '/data/yutao_niu/pdd_data/CarlaSC_quantized_128_128_8/Cartesian/Val'
-    #   # n_iters_this_stage: 1000000
+    #   eval_batch_size: 1
 
-  # prev_scene_path 和 infer_data_path 通常用于推理，这里留空或按需配置
   prev_scene_path: ''
   infer_data_path: ''
   quantized_infer_data_path: ''
 
-# graph, noise, sampling, eval, optim 部分通常可以跨分辨率共享
-# 如果特定阶段需要不同设置，可以在训练循环中覆盖
 graph:
   type: absorb_relay
   file: data
@@ -80,14 +78,12 @@ noise:
   sigma_min: 1e-4
   sigma_max: 20
 
-sampling: # 主要用于评估和生成样本
+sampling: 
   predictor: euler
   steps: 128
   noise_removal: True
 
 eval:
-  # eval_batch_size 也可以在每个 stage 中具体指定，或者使用 stage 的 training batch_size
-  # eval_batch_size: 4 # 全局评估 batch size
   perplexity: True
   perplexity_batch_size: 32
 
@@ -98,18 +94,16 @@ optim:
   beta1: 0.9
   beta2: 0.999
   eps: 1e-8
-  warmup: 10000 # 可能需要根据总迭代次数和阶段调整
+  warmup: 10000 
   grad_clip: 1.
 
 hydra:
   run:
-    # dir: exp_outputs/multires_${data.dataset}_${model.name}/${now:%Y.%m.%d}/${now:%H%M%S}
-    dir: exp_outputs/multires_${data.dataset}_${model.name}/2025.05.31/000302
+    dir: exp_outputs/multires_${data.dataset}_${model.name}/${now:%Y.%m.%d}/${now:%H%M%S}
   sweep:
-    # dir: exp_outputs/multires_${data.dataset}_${model.name}/${now:%Y.%m.%d}/${now:%H%M%S}
-    dir: exp_outputs/multires_${data.dataset}_${model.name}/2025.05.31/000302
+    dir: exp_outputs/multires_${data.dataset}_${model.name}/${now:%Y.%m.%d}/${now:%H%M%S}
     subdir: ${hydra.job.num}
-  launcher: # 根据您的环境配置
+  launcher: 
     max_num_timeout: 100000
     partition: g40x
     account: stanford

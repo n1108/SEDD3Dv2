@@ -165,14 +165,19 @@ def _run(rank, world_size, cfg):
     
     while state['step'] < num_train_steps + 1:
         
-        # Determine current stage. Cycle through stages per data fetch or per optimizer step.
-        # To ensure balanced exposure per optimizer step if accum > 1,
-        # it's common to tie stage cycling to the *optimizer step*.
-        current_stage_idx = state['step'] % num_stages 
+        # 决定当前阶段。现在基于 current_data_fetch_step 轮换阶段
+        # 而不是基于 state['step'] (优化器步骤)
+        # 这样可以确保在一个梯度累积周期内（多次数据获取），数据可以来自不同阶段
+        current_stage_idx = current_data_fetch_step % num_stages 
         current_stage_cfg = cfg.data.stages[current_stage_idx]
         current_image_size = list(current_stage_cfg.image_size) # Ensure it's a list [H,W,U]
         
-        # Fetch data for the current stage for one accumulation step
+        # 为当前累积步骤获取当前阶段的数据
+        if rank == 0 and current_data_fetch_step % (cfg.training.log_freq * cfg.training.accum) == 0 : # 更频繁地打印当前处理的阶段信息
+             mprint(f"Data fetch step: {current_data_fetch_step}, Optimizer step: {state['step']}, "
+                   f"Accumulation: {state['optimizer'].param_groups[0].get('accum_iter', 0)+1 if 'optimizer' in state and hasattr(state['optimizer'], 'param_groups') and state['optimizer'].param_groups[0].get('accum_iter',0) is not None else 'N/A'}/{cfg.training.accum}, " # 尝试获取内部计数器，如果step_fn暴露了的话
+                   f"Fetching data for stage: {current_stage_cfg.name} (idx {current_stage_idx})")
+
         try:
             cond_data, batch_data = next(train_iters[current_stage_idx])
         except StopIteration: # Should not happen with cycle_loader
@@ -182,26 +187,33 @@ def _run(rank, world_size, cfg):
             train_iters[current_stage_idx] = iter(new_train_loader_for_stage)
             cond_data, batch_data = next(train_iters[current_stage_idx])
 
-        # batch_data is [B_gpu, H, W, U], cond_data is [B_gpu, Hc, Wc, Uc]
-        # Reshape batch_data to [B_gpu, L_voxels] for loss_fn and graph ops
         batch_data_flat = batch_data.to(device).reshape(batch_data.shape[0], -1) 
-        cond_data = cond_data.to(device) # Model expects [B, Hc, Wc, Uc]
+        cond_data = cond_data.to(device)
 
-        pre_call_optimizer_step = state['step'] # Optimizer step before calling train_step_fn
+        pre_call_optimizer_step = state['step'] 
 
-        # Pass current_image_size to train_step_fn
-        # loss_val is the loss for this accumulation step (or the accumulated loss if optimizer step happened)
         loss_val = train_step_fn(state, batch_data_flat, current_image_size, cond_data)
 
-        # Check if an optimizer step was made by train_step_fn
+        # 检查 train_step_fn 是否执行了优化器步骤
         if state['step'] > pre_call_optimizer_step:
-            current_optimizer_step = state['step'] # This is the new optimizer step count
+            current_optimizer_step = state['step'] 
             
-            # Logging (log accumulated loss after an optimizer step)
+            # 日志记录 (在优化器步骤之后记录累积损失)
             if current_optimizer_step % cfg.training.log_freq == 0:
+                # train_step_fn 返回的 loss_val 已经是累积后的平均损失 (如果发生了优化器步骤)
+                # 或者当前批次的损失 (如果未发生优化器步骤)
+                # 这里我们只在优化器步骤后记录，所以 loss_val 应该是累积后的
+                log_loss_val = loss_val 
                 if world_size > 1: 
-                    dist.all_reduce(loss_val, op=dist.ReduceOp.AVG) # Average loss across GPUs
-                mprint(f"    training_loss: {loss_val.item():.5e}")
+                    # 如果 loss_val 是从 rank 0 的 get_step_fn 返回的，它可能已经是规约过的（如果 get_step_fn 内部做了）
+                    # 或者它只是 rank 0 的损失。为确保，这里可以再次 all_reduce。
+                    # 但通常 get_step_fn 在优化器步骤后返回的应该是全局平均损失。
+                    # 假设 train_step_fn 返回的 loss_val 在优化器步骤发生时是已经reduce过的平均损失
+                    pass # 假设 loss_val 已经是全局的
+                
+                # 确保 mprint 在 get_step_fn 中的批次日志之后打印
+                if rank == 0: # 确保主日志在详细批次日志之后
+                    mprint(f"    training_loss (accumulated_avg): {log_loss_val.item():.5e}")
             
             # Snapshot for preemption
             if current_optimizer_step % cfg.training.snapshot_freq_for_preemption == 0 and rank == 0:
