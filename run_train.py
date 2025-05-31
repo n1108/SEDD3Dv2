@@ -171,12 +171,6 @@ def _run(rank, world_size, cfg):
         current_stage_idx = current_data_fetch_step % num_stages 
         current_stage_cfg = cfg.data.stages[current_stage_idx]
         current_image_size = list(current_stage_cfg.image_size) # Ensure it's a list [H,W,U]
-        
-        # 为当前累积步骤获取当前阶段的数据
-        if rank == 0 and current_data_fetch_step % (cfg.training.log_freq * cfg.training.accum) == 0 : # 更频繁地打印当前处理的阶段信息
-             mprint(f"Data fetch step: {current_data_fetch_step}, Optimizer step: {state['step']}, "
-                   f"Accumulation: {state['optimizer'].param_groups[0].get('accum_iter', 0)+1 if 'optimizer' in state and hasattr(state['optimizer'], 'param_groups') and state['optimizer'].param_groups[0].get('accum_iter',0) is not None else 'N/A'}/{cfg.training.accum}, " # 尝试获取内部计数器，如果step_fn暴露了的话
-                   f"Fetching data for stage: {current_stage_cfg.name} (idx {current_stage_idx})")
 
         try:
             cond_data, batch_data = next(train_iters[current_stage_idx])
