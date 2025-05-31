@@ -381,10 +381,10 @@ class SEDDCond(nn.Module, PyTorchModelHubMixin):
 
 
     def forward(self, indices, cond, sigma, current_image_size):
-        print(f"[DEBUG] SEDDCond.forward: current_image_size received: {current_image_size}") # 添加调试打印
+        # print(f"[DEBUG] SEDDCond.forward: current_image_size received: {current_image_size}") # 添加调试打印
         b = indices.shape[0]
         h, w, u = current_image_size[0], current_image_size[1], current_image_size[2]
-        print(f"[DEBUG] SEDDCond.forward: h={h}, w={w}, u={u}") # 添加调试打印
+        # print(f"[DEBUG] SEDDCond.forward: h={h}, w={w}, u={u}") # 添加调试打印
         hwu=[h//self.config.model.patch_size, w//self.config.model.patch_size, u//self.config.model.patch_size]
         num_patches = hwu[0] * hwu[1] * hwu[2]
         position_ids = torch.zeros(num_patches, 3, device=indices.device)

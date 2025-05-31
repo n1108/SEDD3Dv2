@@ -96,7 +96,7 @@ def get_dataloaders(config, current_stage_config, distributed=True, prev_scene_p
     ))
     valid_loader = cycle_loader(DataLoader(
         valid_set,
-        batch_size=stage_eval_batch_size // config.training.accum, # (通常 eval 时 accum=1)
+        batch_size=stage_eval_batch_size,
         sampler=test_sampler,
         num_workers=4,
         collate_fn=valid_set.collate_fn,
